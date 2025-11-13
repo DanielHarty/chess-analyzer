@@ -10,6 +10,7 @@ import chess.pgn
 import os
 import json
 from pathlib import Path
+from game_model import GameModel
 
 # Canvas-based board: JS helper with setPosition({ square: "P", ... })
 BOARD_HTML = """
@@ -29,26 +30,24 @@ BOARD_JS_INIT = (Path(__file__).parent / 'chess_board.js').read_text(encoding='u
 BOARD_CSS_INIT = (Path(__file__).parent / 'chess_board.css').read_text(encoding='utf-8')
 
 class ChessAnalyzer:
-    """Main application class for chess game analysis.
+    """Main GUI application class for chess game analysis.
 
-    Future architecture note: Consider splitting into separate classes:
-    - GameModel: Handle game state, moves, SAN conversion, and board logic
-    - ChessAnalyzer: Focus on UI interaction and display logic
-    This would enable better testing and modularity for features like engine evaluation.
+    This class handles all user interface concerns including:
+    - NiceGUI widget management and updates
+    - JavaScript communication with the chess board
+    - User interaction handling (clicks, uploads, navigation)
+
+    Game logic is delegated to the GameModel class for better separation of concerns
+    and testability.
     """
 
 
 
     def __init__(self):
         """Initialize the chess analyzer."""
-        self.current_game = None
+        self.model = GameModel()
         self.moves_container = None
         self.controls_container = None
-        self.current_ply = 0
-        self.board = None  # chess.Board object for current position
-        self.moves = []  # Cache mainline moves to avoid recomputation
-        self.san_moves = []  # Cache SAN notation for moves
-        self.last_move_squares = set()  # Track squares for last move highlighting
         self.game_title_label = None  # Label to display game title above board
         self.move_row_elements = {}  # Store references to move row elements for scrolling
         self.upload_element = None  # Upload component for PGN files
@@ -80,46 +79,12 @@ class ChessAnalyzer:
         else:
             raise ValueError("Unable to extract content from uploaded file")
 
-    def parse_pgn_game(self, pgn_content):
-        """Parse PGN content into a chess game object."""
-        pgn_stream = io.StringIO(pgn_content)
-        game = chess.pgn.read_game(pgn_stream)
-        return game
-
-    def get_san_moves(self):
-        """Generate SAN notation moves from cached moves."""
-        if not self.current_game or not self.moves:
-            return []
-
-        # Use cached SAN moves if available
-        if self.san_moves:
-            return self.san_moves
-
-        # Generate SAN moves from temporary board
-        board = self.current_game.board()
-        san_moves = []
-        for move in self.moves:
-            san = board.san(move)
-            san_moves.append(san)
-            board.push(move)
-
-        self.san_moves = san_moves  # Cache result
-        return san_moves
-
-
     async def handle_upload(self, event):
         """Handle PGN file upload and parsing."""
         try:
-            # Extract file content
             filename, content = await self.process_pgn_file(event.file)
 
-            # Parse the chess game
-            self.current_game = self.parse_pgn_game(content)
-            self.current_ply = 0  # Reset to starting position
-            self.board = self.current_game.board()  # Initialize board at starting position
-            self.moves = list(self.current_game.mainline_moves())  # Cache moves to avoid recomputation
-            self.san_moves = []  # Clear SAN cache for new game
-            self.last_move_squares = set()  # Clear last move highlighting
+            self.model.load_pgn_text(content)
             self.move_row_elements.clear()  # Clear move row references
 
             # Update game title
@@ -138,58 +103,50 @@ class ChessAnalyzer:
         if self.moves_container is None:
             return
 
-        # Clear existing content
         self.moves_container.clear()
-        self.move_row_elements.clear()  # Clear stored row references
+        self.move_row_elements.clear()
 
-        if self.current_game is None:
+        if self.model.current_game is None:
             with self.moves_container:
                 ui.label('No game loaded').classes('text-gray-400 text-center py-8')
+            self.update_controls()
             return
 
-        # Get SAN moves
-        san_moves = self.get_san_moves()
+        rows = self.model.get_move_rows()
+        current_ply = self.model.current_ply
 
         with self.moves_container:
-            for i in range(0, len(san_moves), 2):
-                move_number = (i // 2) + 1
-                white_move = san_moves[i]
-                black_move = san_moves[i + 1] if i + 1 < len(san_moves) else ''
-                white_ply = i
-                black_ply = i + 1
+            for row_index, (move_number, white_move, black_move) in enumerate(rows):
+                white_ply = row_index * 2
+                black_ply = white_ply + 1
 
-                # Create move row and store reference for scrolling
                 move_row = ui.row().classes('w-full justify-between py-1')
                 self.move_row_elements[move_number] = move_row
 
                 with move_row:
                     ui.label(f"{move_number}.").classes('text-gray-300 w-8')
 
-                    # White move highlighting
-                    is_active_white = (white_ply + 1 == self.current_ply)
+                    # white
+                    is_active_white = (white_ply + 1 == current_ply)
                     white_classes = 'text-white flex-1 text-center cursor-pointer px-2 py-1 rounded'
-                    if is_active_white:
-                        white_classes += ' bg-blue-700'
-                    else:
-                        white_classes += ' hover:bg-gray-700'
-                    ui.label(white_move).classes(white_classes).on('click', self.make_jump_handler(white_ply + 1))
+                    white_classes += ' bg-blue-700' if is_active_white else ' hover:bg-gray-700'
+                    ui.label(white_move).classes(white_classes).on(
+                        'click', self.make_jump_handler(white_ply + 1)
+                    )
 
-                    # Black move highlighting
-                    is_active_black = (black_ply + 1 == self.current_ply)
+                    # black
+                    is_active_black = (black_ply + 1 == current_ply)
                     black_classes = 'text-white flex-1 text-center cursor-pointer px-2 py-1 rounded'
-                    if is_active_black:
-                        black_classes += ' bg-blue-700'
-                    else:
-                        black_classes += ' hover:bg-gray-700'
+                    black_classes += ' bg-blue-700' if is_active_black else ' hover:bg-gray-700'
                     black_label = ui.label(black_move).classes(black_classes)
-                    if black_ply < len(san_moves):
+                    if black_move:
                         black_label.on('click', self.make_jump_handler(black_ply + 1))
 
         # Auto-scroll to current move if we're not at the starting position
-        if self.current_ply > 0:
+        if self.model.current_ply > 0:
             # Calculate which row contains the current move
             # Each row has 2 moves (white and black), so row number = ((ply - 1) // 2) + 1
-            current_row_number = ((self.current_ply - 1) // 2) + 1
+            current_row_number = ((self.model.current_ply - 1) // 2) + 1
             if current_row_number in self.move_row_elements:
                 # Use run_method to scroll the row into view
                 self.move_row_elements[current_row_number].run_method('scrollIntoView', {'behavior': 'smooth', 'block': 'start'})
@@ -205,7 +162,7 @@ class ChessAnalyzer:
         # Clear existing controls
         self.controls_container.clear()
 
-        if self.current_game:
+        if self.model.current_game:
             # Show navigation buttons
             with self.controls_container:
                 with ui.row().classes('w-full justify-center gap-4'):
@@ -218,97 +175,70 @@ class ChessAnalyzer:
             with self.controls_container:
                 ui.label('Upload a PGN file to start analyzing').classes('text-gray-400 text-center')
 
-    def update_board_to_ply(self, ply):
-        """Update the board to a specific ply.
-
-        Args:
-            ply: The ply index to display (0 = starting position)
-        """
-        if not self.current_game:
-            return
-
-        # Reset board to starting position
-        self.board = self.current_game.board()
-
-        # Apply moves up to the current ply
-        limit = min(ply, len(self.moves))
-        for i in range(limit):
-            self.board.push(self.moves[i])
-
-        # Set last move highlighting
-        if ply > 0 and ply <= len(self.moves):
-            last_move = self.moves[ply - 1]
-            self.last_move_squares = {
-                chess.square_name(last_move.from_square),
-                chess.square_name(last_move.to_square),
-            }
-        else:
-            self.last_move_squares = set()
-    
 
     def go_to_first_move(self):
         """Go to the starting position (total board reset)."""
-        self.current_ply = 0
-        self.update_board_to_ply(self.current_ply)
+        self.model.go_to_start()
         self.send_full_position_to_js()
         self.display_moves()
 
     def go_to_previous_move(self):
         """Go to the previous move."""
-        if self.current_ply > 0:
-            self.current_ply -= 1
-            self.update_board_to_ply(self.current_ply)
+        if self.model.current_game is None:
+            return
+
+        result = self.model.step_back()
+        if result is None:
+            return
+
+        is_special = (
+            result["piece"] is None
+            or result["is_castling"]
+            or result["is_en_passant"]
+            or result["is_promotion"]
+        )
+
+        if not is_special and result["piece"] is not None:
+            symbol = result["piece"].symbol()
+            self.animate_single_move(result["from"], result["to"], symbol)
+        else:
             self.send_full_position_to_js()
-            self.display_moves()
+
+        self.display_moves()
 
     def go_to_next_move(self):
         """Go to the next move."""
-        if self.current_game:
-            if self.current_ply < len(self.moves):
-                # Get the move before applying it
-                move = self.moves[self.current_ply]
-                piece = self.board.piece_at(move.from_square)
+        if self.model.current_game is None:
+            return
 
-                # Determine whether animation is safe for this move
-                should_animate = True
-                if (
-                    piece is None
-                    or self.board.is_castling(move)
-                    or self.board.is_en_passant(move)
-                    or move.promotion is not None
-                ):
-                    should_animate = False
+        result = self.model.step_forward()
+        if result is None:
+            return
 
-                # Apply the move to the board
-                self.board.push(move)
-                self.current_ply += 1
+        is_special = (
+            result["piece"] is None
+            or result["is_castling"]
+            or result["is_en_passant"]
+            or result["is_promotion"]
+        )
 
-                from_name = chess.square_name(move.from_square)
-                to_name = chess.square_name(move.to_square)
+        if not is_special and result["piece"] is not None:
+            symbol = result["piece"].symbol()
+            self.animate_single_move(result["from"], result["to"], symbol)
+        else:
+            self.send_full_position_to_js()
 
-                if should_animate and piece is not None:
-                    symbol = piece.symbol()
-                    self.animate_single_move(from_name, to_name, symbol)
-                else:
-                    self.send_full_position_to_js()
-
-                # Update last move highlighting
-                self.last_move_squares = {from_name, to_name}
-
-                self.display_moves()
+        self.display_moves()
 
     def go_to_last_move(self):
         """Go to the last move."""
-        if self.current_game:
-            self.current_ply = len(self.moves)
-            self.update_board_to_ply(self.current_ply)
-            self.send_full_position_to_js()
-            self.display_moves()
+        self.model.go_to_end()
+        self.send_full_position_to_js()
+        self.display_moves()
 
     def jump_to_ply(self, ply):
         """Jump to a specific ply by clicking on a move."""
-        self.current_ply = ply
-        self.update_board_to_ply(self.current_ply)
+        self.model.go_to_ply(ply)
         self.send_full_position_to_js()
         self.display_moves()
 
@@ -322,9 +252,9 @@ class ChessAnalyzer:
         if self.game_title_label is None:
             return
 
-        if self.current_game:
-            white = self.current_game.headers.get('White', 'Unknown')
-            black = self.current_game.headers.get('Black', 'Unknown')
+        if self.model.current_game:
+            white = self.model.current_game.headers.get('White', 'Unknown')
+            black = self.model.current_game.headers.get('Black', 'Unknown')
             self.game_title_label.text = f"{white} vs {black}"
         else:
             self.game_title_label.text = "No game loaded"
@@ -335,13 +265,7 @@ class ChessAnalyzer:
             with open('kasparov_topalov_1999.pgn', 'r', encoding='utf-8') as f:
                 content = f.read()
 
-            # Parse the chess game
-            self.current_game = self.parse_pgn_game(content)
-            self.current_ply = 0  # Reset to starting position
-            self.board = self.current_game.board()  # Initialize board at starting position
-            self.moves = list(self.current_game.mainline_moves())  # Cache moves to avoid recomputation
-            self.san_moves = []  # Clear SAN cache for new game
-            self.last_move_squares = set()  # Clear last move highlighting
+            self.model.load_pgn_text(content)
             self.move_row_elements.clear()  # Clear move row references
 
             # Update game title
@@ -404,13 +328,10 @@ class ChessAnalyzer:
 
     def send_full_position_to_js(self):
         """Send the current board position to the browser (no animation)."""
-        if self.board is None:
+        if self.model.board is None:
             return
 
-        pos_dict = {
-            chess.square_name(square): piece.symbol()
-            for square, piece in self.board.piece_map().items()
-        }
+        pos_dict = self.model.get_position_dict()
         position_json = json.dumps(pos_dict)
 
         # Guard against chessAnim not being defined yet
