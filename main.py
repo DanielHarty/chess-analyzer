@@ -398,7 +398,7 @@ class ChessAnalyzer:
         with ui.column().classes('fixed inset-0 w-screen h-screen bg-gray-900 text-white overflow-hidden'):
             # Header
             with ui.row().classes('w-full px-4 py-3 border-b border-gray-700 items-center gap-4 flex-shrink-0'):
-                ui.label('Chess Analyzer').classes('text-2xl font-bold')
+                ui.label('Chess Analyzer v0.1').classes('text-2xl font-bold')
                 ui.upload(on_upload=self.handle_upload, label="Upload PGN", auto_upload=True).classes('ml-auto')
 
             # Main content area
