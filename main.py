@@ -140,44 +140,34 @@ class ChessAnalyzer:
         """
         if board_state is None:
             board_state = self.INITIAL_BOARD
-            
-        # Set sizes based on large parameter
-        if large:
-            cell_size = 64  # pixels
-            font_size = 48  # pixels
-            label_size = 24  # pixels
-        else:
-            cell_size = 32  # pixels
-            font_size = 24  # pixels
-            label_size = 14  # pixels
 
-        # Common cell style to ensure perfect squares
-        cell_style = f"width: {cell_size}px; height: {cell_size}px; min-width: {cell_size}px; max-width: {cell_size}px; min-height: {cell_size}px; max-height: {cell_size}px; text-align: center; font-weight: bold; line-height: {cell_size}px; box-sizing: border-box;"
+        # Set sizes based on large parameter - use scalable CSS units
+        if large:
+            # Use both viewport dimensions to scale responsively
+            # 8 rows only (no separate label row), plus header/padding ~150px vertically, ~350px horizontally (for moves panel)
+            cell_size = "calc(min((100vh - 150px) / 8, (100vw - 350px) / 8))"  # Scale to fill available space
+            font_size = "calc(min((100vh - 150px) / 12, (100vw - 350px) / 12))"  # Scale piece font size
+            label_size = "calc(min((100vh - 150px) / 50, (100vw - 350px) / 50))"  # Scale label font size (smaller for corner)
+        else:
+            cell_size = "32px"
+            font_size = "24px"
+            label_size = "10px"
+
+        # Common cell style to ensure perfect squares with scalable units
+        cell_style = f"width: {cell_size}; height: {cell_size}; min-width: {cell_size}; max-width: {cell_size}; min-height: {cell_size}; max-height: {cell_size}; text-align: center; font-weight: bold; box-sizing: border-box; position: relative; padding: 0;"
 
         table_html = f'''
-            <table style="border-collapse: collapse; border: 2px solid #374151; display: inline-table; table-layout: fixed;">
-                <tr style="height: {cell_size}px;">
-                    <td style="{cell_style} color: #6B7280; font-size: {label_size}px; vertical-align: middle;"></td>
-                    <td style="{cell_style} color: #6B7280; font-size: {label_size}px; vertical-align: middle;">a</td>
-                    <td style="{cell_style} color: #6B7280; font-size: {label_size}px; vertical-align: middle;">b</td>
-                    <td style="{cell_style} color: #6B7280; font-size: {label_size}px; vertical-align: middle;">c</td>
-                    <td style="{cell_style} color: #6B7280; font-size: {label_size}px; vertical-align: middle;">d</td>
-                    <td style="{cell_style} color: #6B7280; font-size: {label_size}px; vertical-align: middle;">e</td>
-                    <td style="{cell_style} color: #6B7280; font-size: {label_size}px; vertical-align: middle;">f</td>
-                    <td style="{cell_style} color: #6B7280; font-size: {label_size}px; vertical-align: middle;">g</td>
-                    <td style="{cell_style} color: #6B7280; font-size: {label_size}px; vertical-align: middle;">h</td>
-                </tr>'''
+            <table style="border-collapse: collapse; border: 2px solid #374151; display: inline-table; table-layout: fixed;">'''
 
         # Add board rows
         for rank in range(8, 0, -1):  # 8 to 1
-            # Force exact row height
             table_html += f'''
-                <tr style="height: {cell_size}px;">
-                    <td style="{cell_style} color: #6B7280; font-size: {label_size}px; vertical-align: middle;">{rank}</td>'''
+                <tr style="height: {cell_size};">'''
 
             for file in range(8):
                 piece = board_state[8-rank][file]
-                square_name = chr(ord('a') + file) + str(rank)
+                file_letter = chr(ord('a') + file)
+                square_name = file_letter + str(rank)
                 is_light = (rank + file) % 2 == 0
                 is_highlighted = highlight_squares and square_name in highlight_squares
 
@@ -197,8 +187,23 @@ class ChessAnalyzer:
                 piece_symbol = self.CHESS_PIECES.get(piece, '') if piece != ' ' else ''
                 # Add drop shadow for better visibility
                 shadow_style = 'text-shadow: 1px 1px 2px rgba(0,0,0,0.7);' if piece != ' ' else ''
+                
+                # Add file letter label on rank 1 (bottom row) - bottom right
+                # Alternate colors: a light, b dark, c light, d dark, etc.
+                file_color = '#FFFFFF' if file % 2 == 0 else '#000000'  # a=0(light), b=1(dark), c=2(light), etc.
+                file_label = f'<span style="position: absolute; bottom: 1%; right: 2%; font-size: {label_size}; color: {file_color}; font-weight: normal; text-shadow: 1px 1px 1px rgba(0,0,0,0.5);">{file_letter}</span>' if rank == 1 else ''
+
+                # Add rank number label on file 'a' (leftmost column) - top left
+                # Alternate colors: 8 light, 7 dark, 6 light, 5 dark, etc.
+                rank_color = '#FFFFFF' if rank % 2 == 1 else '#000000'  # 8=1(light), 7=0(dark), 6=2(light), etc.
+                rank_label = f'<span style="position: absolute; top: 1%; left: 2%; font-size: {label_size}; color: {rank_color}; font-weight: normal; text-shadow: 1px 1px 1px rgba(0,0,0,0.5);">{rank}</span>' if file == 0 else ''
+                
                 table_html += f'''
-                    <td style="{cell_style} background-color: {bg_color}; color: {text_color}; font-size: {font_size}px; cursor: pointer; vertical-align: middle; {shadow_style}" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">{piece_symbol}</td>'''
+                    <td style="{cell_style} background-color: {bg_color}; color: {text_color}; cursor: pointer;" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">
+                        <div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; position: relative; font-size: {font_size}; {shadow_style}">
+                            {rank_label}{file_label}{piece_symbol}
+                        </div>
+                    </td>'''
 
             table_html += '''
                 </tr>'''
@@ -376,7 +381,7 @@ class ChessAnalyzer:
 
     def go_to_first_move(self):
         """Go to the first move."""
-        self.current_ply = 0
+        self.current_ply = 1
         self.update_board_to_ply(self.current_ply)
         self.update_board_display()
         self.display_moves()
@@ -508,27 +513,27 @@ class ChessAnalyzer:
             # Main content area
             with ui.row().classes('flex-1 gap-4 px-4 py-2 overflow-hidden min-h-0'):
                 # Left side: Chess board
-                with ui.column().classes('flex-1 items-center justify-center bg-gray-800 rounded-lg p-2 overflow-hidden'):
+                with ui.column().classes('flex-1 items-center justify-center bg-gray-800 rounded-lg p-2 overflow-hidden min-w-0'):
                     # Game title above board
                     self.game_title_label = ui.label('No game loaded').classes('text-lg font-bold text-center text-white mb-2')
 
-                    self.board_container = ui.column().classes('flex items-center justify-center')
+                    self.board_container = ui.column().classes('flex-1 items-center justify-center w-full h-full min-w-0 min-h-0')
                     with self.board_container:
                         board_html = self.create_chess_board_html(large=True, highlight_squares=set())
                         ui.html(board_html, sanitize=False)
 
                 # Right side: Moves panel
-                with ui.column().classes('w-72 bg-gray-800 rounded-lg overflow-hidden flex flex-col'):
+                with ui.column().classes('w-72 bg-gray-800 rounded-lg overflow-hidden flex flex-col h-full'):
                     # Header
-                    ui.label('Moves').classes('text-lg font-bold p-4 border-b border-gray-700')
+                    ui.label('Moves').classes('text-lg font-bold p-4 border-b border-gray-700 flex-shrink-0')
 
                     # Moves list
-                    self.moves_container = ui.column().classes('flex-1 w-full overflow-y-auto pl-4 pr-0 py-2 gap-2 max-h-96 modern-scrollbar')
+                    self.moves_container = ui.column().classes('flex-1 w-full overflow-y-auto pl-4 pr-0 py-2 gap-2 modern-scrollbar min-h-0')
                     with self.moves_container:
                         ui.label('No game loaded').classes('text-gray-400 text-center py-8')
 
                     # Game controls at bottom
-                    self.controls_container = ui.column().classes('w-full border-t border-gray-700 p-4')
+                    self.controls_container = ui.column().classes('w-full border-t border-gray-700 p-4 flex-shrink-0')
                     with self.controls_container:
                         ui.label('Upload a PGN file to start analyzing').classes('text-gray-400 text-center')
 
