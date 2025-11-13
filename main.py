@@ -26,6 +26,7 @@ BOARD_HTML = """
 """
 
 BOARD_JS_INIT = (Path(__file__).parent / 'chess_board.js').read_text(encoding='utf-8')
+BOARD_CSS_INIT = (Path(__file__).parent / 'chess_board.css').read_text(encoding='utf-8')
 
 class ChessAnalyzer:
     """Main application class for chess game analysis.
@@ -330,30 +331,7 @@ class ChessAnalyzer:
     def create_ui(self):
         """Create and setup the user interface."""
         # Add modern scrollbar styling
-        ui.add_css('''
-            .modern-scrollbar {
-                scrollbar-width: thin;
-                scrollbar-color: #4B5563 #1F2937;
-            }
-            .modern-scrollbar::-webkit-scrollbar {
-                width: 8px;
-            }
-            .modern-scrollbar::-webkit-scrollbar-track {
-                background: #1F2937;
-                border-radius: 4px;
-            }
-            .modern-scrollbar::-webkit-scrollbar-thumb {
-                background: #4B5563;
-                border-radius: 4px;
-                border: 1px solid #1F2937;
-            }
-            .modern-scrollbar::-webkit-scrollbar-thumb:hover {
-                background: #6B7280;
-            }
-            .modern-scrollbar::-webkit-scrollbar-thumb:active {
-                background: #9CA3AF;
-            }
-        ''')
+        ui.add_css(BOARD_CSS_INIT)
 
         with ui.column().classes('fixed inset-0 w-screen h-screen bg-gray-900 text-white overflow-hidden'):
             # Header
