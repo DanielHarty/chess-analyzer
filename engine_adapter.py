@@ -8,6 +8,7 @@ from typing import Optional
 import chess
 import chess.engine
 
+# Default paths - will be overridden by main.py with platform-specific binaries
 DEFAULT_STOCKFISH_PATH = os.environ.get('STOCKFISH_PATH', 'stockfish')
 
 class StockfishEngine:

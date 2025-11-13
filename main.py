@@ -15,7 +15,8 @@ ROOT = Path(__file__).resolve().parent
 if platform.system() == 'Windows':
     ENGINE_PATH = ROOT / 'engines' / 'stockfish' / 'windows' / 'stockfish-windows-x86-64-avx2.exe'
 else:
-    ENGINE_PATH = ROOT / 'engines' / 'stockfish' / 'linux' / 'stockfish-linux-x86-64-avx2'
+    # Linux/macOS
+    ENGINE_PATH = ROOT / 'engines' / 'stockfish' / 'linux' / 'stockfish-ubuntu-x86-64-avx2'
 
 # Canvas-based board: JS helper with setPosition({ square: "P", ... })
 BOARD_HTML = """
