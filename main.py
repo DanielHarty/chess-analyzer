@@ -3,10 +3,7 @@ Chess Game Analyzer
 A NiceGUI application for uploading and analyzing chess games in PGN format.
 """
 
-import io
 from nicegui import ui
-import chess
-import chess.pgn
 import os
 import json
 from pathlib import Path
