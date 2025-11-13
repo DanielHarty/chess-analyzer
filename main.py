@@ -8,7 +8,130 @@ from nicegui import ui
 import chess
 import chess.pgn
 import os
+import json
 
+# Canvas-based board: JS helper with setPosition({ square: "P", ... })
+BOARD_HTML = """
+<div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center;">
+  <div id="chess_board_root"
+       style="
+         position:relative;
+         width: min(70vh, 70vw);
+         height: min(70vh, 70vw);
+       ">
+    <canvas id="chess_board_canvas" style="width:100%; height:100%;"></canvas>
+  </div>
+</div>
+"""
+
+BOARD_JS_INIT = r"""
+(function () {
+  const root = document.getElementById('chess_board_root');
+  const canvas = document.getElementById('chess_board_canvas');
+  if (!root || !canvas) {
+    console.warn('Chess board root/canvas not found');
+    return;
+  }
+
+  const ctx = canvas.getContext('2d');
+
+  function squareToXY(square) {
+    const file = square.charCodeAt(0) - 'a'.charCodeAt(0); // 0..7
+    const rank = parseInt(square[1], 10) - 1;              // 0..7
+    const size = canvas.width / 8;
+    const x = file * size;
+    const y = (7 - rank) * size; // rank 1 at bottom
+    return { x, y, size };
+  }
+
+  function drawBoard() {
+    if (!canvas.width) return;
+    const size = canvas.width / 8;
+    for (let r = 0; r < 8; r++) {
+      for (let f = 0; f < 8; f++) {
+        const light = (r + f) % 2 === 0;
+        ctx.fillStyle = light ? '#FEF3C7' : '#92400E';
+        ctx.fillRect(f * size, r * size, size, size);
+      }
+    }
+  }
+
+  function pieceToUnicode(symbol) {
+    const map = {
+      'K': '♔', 'Q': '♕', 'R': '♖', 'B': '♗', 'N': '♘', 'P': '♙',
+      'k': '♚', 'q': '♛', 'r': '♜', 'b': '♝', 'n': '♞', 'p': '♟',
+    };
+    return map[symbol] || '?';
+  }
+
+  let position = {}; // { "e2": "P", ... }
+
+  function draw() {
+    if (!canvas.width) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawBoard();
+
+    const size = canvas.width / 8;
+    ctx.font = (size * 0.7) + 'px system-ui';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    for (const square in position) {
+      if (!Object.prototype.hasOwnProperty.call(position, square)) continue;
+      const piece = position[square];
+      const glyph = pieceToUnicode(piece);
+      const { x, y, size: s } = squareToXY(square);
+      const cx = x + s / 2;
+      const cy = y + s / 2;
+      const isWhite = (piece === piece.toUpperCase());
+
+      // Outline + shadow settings
+      ctx.lineWidth = size * 0.08;
+      ctx.shadowBlur = size * 0.15;
+
+      if (isWhite) {
+        // White pieces: dark outline + strong shadow
+        ctx.fillStyle = '#FFFFFF';
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.9)';
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
+      } else {
+        // Black pieces: no outline + shadow
+        ctx.fillStyle = '#000000';
+        ctx.strokeStyle = 'transparent';
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
+      }
+
+      // Draw outline then fill
+      ctx.strokeText(glyph, cx, cy);
+      ctx.fillText(glyph, cx, cy);
+    }
+
+    // Reset shadow so it doesn't leak into other drawings
+    ctx.shadowBlur = 0;
+    ctx.shadowColor = 'transparent';
+  }
+
+  function resize() {
+    const rect = root.getBoundingClientRect();
+    const size = Math.min(rect.width, rect.height); // root is already ~70vh square
+    canvas.width = size;
+    canvas.height = size;
+    draw();
+  }
+
+  window.addEventListener('resize', resize);
+
+  // Public API for Python
+  window.chessAnim = window.chessAnim || {};
+  window.chessAnim.setPosition = function (pos) {
+    position = pos || {};
+    draw();
+  };
+
+  // Initial empty board
+  resize();
+})();
+"""
 
 class ChessAnalyzer:
     """Main application class for chess game analysis.
@@ -19,31 +142,13 @@ class ChessAnalyzer:
     This would enable better testing and modularity for features like engine evaluation.
     """
 
-    # Chess piece Unicode symbols
-    CHESS_PIECES = {
-        'K': '♔', 'Q': '♕', 'R': '♖', 'B': '♗', 'N': '♘', 'P': '♙',  # White pieces
-        'k': '♚', 'q': '♛', 'r': '♜', 'b': '♝', 'n': '♞', 'p': '♟'   # Black pieces
-    }
 
-    # Initial chess board setup (FEN notation: rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR)
-    # White pieces at bottom (home side), black pieces at top (far side)
-    INITIAL_BOARD = [
-        ['r', 'n', 'b', 'q', 'k', 'b', 'n', 'r'],  # rank 8 - black pieces at top
-        ['p', 'p', 'p', 'p', 'p', 'p', 'p', 'p'],  # rank 7 - black pieces
-        [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '],   # rank 6
-        [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '],   # rank 5
-        [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '],   # rank 4
-        [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '],   # rank 3
-        ['P', 'P', 'P', 'P', 'P', 'P', 'P', 'P'],  # rank 2 - white pieces
-        ['R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R']   # rank 1 - white pieces at bottom
-    ]
 
     def __init__(self):
         """Initialize the chess analyzer."""
         self.current_game = None
         self.moves_container = None
         self.controls_container = None
-        self.board_container = None
         self.current_ply = 0
         self.board = None  # chess.Board object for current position
         self.moves = []  # Cache mainline moves to avoid recomputation
@@ -106,112 +211,6 @@ class ChessAnalyzer:
         self.san_moves = san_moves  # Cache result
         return san_moves
 
-    def board_to_2d_array(self, board):
-        """Convert chess.Board to 2D array for display.
-        
-        Args:
-            board: chess.Board object
-            
-        Returns:
-            2D list representing the board (rank 8 to rank 1)
-        """
-        board_array = []
-        for rank in range(7, -1, -1):  # 7 to 0 (rank 8 to rank 1)
-            row = []
-            for file in range(8):  # a to h
-                square = chess.square(file, rank)
-                piece = board.piece_at(square)
-                if piece:
-                    # Convert to our notation (uppercase=white, lowercase=black)
-                    symbol = piece.symbol()
-                    row.append(symbol)
-                else:
-                    row.append(' ')
-            board_array.append(row)
-        return board_array
-
-    def create_chess_board_html(self, large=False, board_state=None, highlight_squares=None):
-        """Generate HTML for the chess board display.
-
-        Args:
-            large: If True, creates a larger board that scales with viewport
-            board_state: 2D array representing board state (if None, uses INITIAL_BOARD)
-            highlight_squares: Set of square names (e.g., {'e2', 'e4'}) to highlight
-        """
-        if board_state is None:
-            board_state = self.INITIAL_BOARD
-
-        # Set sizes based on large parameter - use scalable CSS units
-        if large:
-            # Use both viewport dimensions to scale responsively
-            # 8 rows only (no separate label row), plus header/padding ~150px vertically, ~350px horizontally (for moves panel)
-            cell_size = "calc(min((100vh - 150px) / 8, (100vw - 350px) / 8))"  # Scale to fill available space
-            font_size = "calc(min((100vh - 150px) / 12, (100vw - 350px) / 12))"  # Scale piece font size
-            label_size = "calc(min((100vh - 150px) / 50, (100vw - 350px) / 50))"  # Scale label font size (smaller for corner)
-        else:
-            cell_size = "32px"
-            font_size = "24px"
-            label_size = "10px"
-
-        # Common cell style to ensure perfect squares with scalable units
-        cell_style = f"width: {cell_size}; height: {cell_size}; min-width: {cell_size}; max-width: {cell_size}; min-height: {cell_size}; max-height: {cell_size}; text-align: center; font-weight: bold; box-sizing: border-box; position: relative; padding: 0;"
-
-        table_html = f'''
-            <table style="border-collapse: collapse; border: 2px solid #374151; display: inline-table; table-layout: fixed;">'''
-
-        # Add board rows
-        for rank in range(8, 0, -1):  # 8 to 1
-            table_html += f'''
-                <tr style="height: {cell_size};">'''
-
-            for file in range(8):
-                piece = board_state[8-rank][file]
-                file_letter = chr(ord('a') + file)
-                square_name = file_letter + str(rank)
-                is_light = (rank + file) % 2 == 0
-                is_highlighted = highlight_squares and square_name in highlight_squares
-
-                if is_highlighted:
-                    bg_color = '#10B981' if is_light else '#059669'  # emerald-500 : emerald-600
-                else:
-                    bg_color = '#FEF3C7' if is_light else '#92400E'  # amber-100 : amber-800
-
-                # Set piece color based on piece type, not square color
-                if piece.isupper():  # White pieces
-                    text_color = '#FFFFFF'  # White
-                elif piece.islower():  # Black pieces
-                    text_color = '#000000'  # Black
-                else:
-                    text_color = '#000000'  # Empty squares
-
-                piece_symbol = self.CHESS_PIECES.get(piece, '') if piece != ' ' else ''
-                # Add drop shadow for better visibility
-                shadow_style = 'text-shadow: 1px 1px 2px rgba(0,0,0,0.7);' if piece != ' ' else ''
-                
-                # Add file letter label on rank 1 (bottom row) - bottom right
-                # Alternate colors: a light, b dark, c light, d dark, etc.
-                file_color = '#FFFFFF' if file % 2 == 0 else '#000000'  # a=0(light), b=1(dark), c=2(light), etc.
-                file_label = f'<span style="position: absolute; bottom: 1%; right: 2%; font-size: {label_size}; color: {file_color}; font-weight: normal; text-shadow: 1px 1px 1px rgba(0,0,0,0.5);">{file_letter}</span>' if rank == 1 else ''
-
-                # Add rank number label on file 'a' (leftmost column) - top left
-                # Alternate colors: 8 light, 7 dark, 6 light, 5 dark, etc.
-                rank_color = '#FFFFFF' if rank % 2 == 1 else '#000000'  # 8=1(light), 7=0(dark), 6=2(light), etc.
-                rank_label = f'<span style="position: absolute; top: 1%; left: 2%; font-size: {label_size}; color: {rank_color}; font-weight: normal; text-shadow: 1px 1px 1px rgba(0,0,0,0.5);">{rank}</span>' if file == 0 else ''
-                
-                table_html += f'''
-                    <td style="{cell_style} background-color: {bg_color}; color: {text_color}; cursor: pointer;" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">
-                        <div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; position: relative; font-size: {font_size}; {shadow_style}">
-                            {rank_label}{file_label}{piece_symbol}
-                        </div>
-                    </td>'''
-
-            table_html += '''
-                </tr>'''
-
-        table_html += '''
-            </table>'''
-
-        return table_html
 
     async def handle_upload(self, event):
         """Handle PGN file upload and parsing."""
@@ -231,16 +230,9 @@ class ChessAnalyzer:
             # Update game title
             self.update_game_title()
 
-            # Display results
-            print(f"✓ Successfully processed: {filename}")
-            print(f"Game headers: {dict(self.current_game.headers)}")
-            print(f"Number of moves: {len(self.moves)}")
-
             # Update the UI with moves and board
             self.display_moves()
-            self.update_board_display()
-
-            ui.notify(f"Successfully uploaded and parsed: {filename}", type="positive")
+            self.send_full_position_to_js()
 
         except Exception as e:
             print(f"✗ Upload error: {e}")
@@ -248,25 +240,20 @@ class ChessAnalyzer:
 
     def display_moves(self):
         """Display the moves in the right panel."""
-        print(f"display_moves called, moves_container: {self.moves_container}")
         if self.moves_container is None:
-            print("moves_container is None!")
             return
 
         # Clear existing content
         self.moves_container.clear()
-        print("Cleared moves_container")
         self.move_row_elements.clear()  # Clear stored row references
 
         if self.current_game is None:
-            print("No current game")
             with self.moves_container:
                 ui.label('No game loaded').classes('text-gray-400 text-center py-8')
             return
 
         # Get SAN moves
         san_moves = self.get_san_moves()
-        print(f"Found {len(san_moves)} moves")
 
         with self.moves_container:
             for i in range(0, len(san_moves), 2):
@@ -363,27 +350,12 @@ class ChessAnalyzer:
         else:
             self.last_move_squares = set()
     
-    def update_board_display(self):
-        """Update the board display with current position."""
-        if self.board_container is None or self.board is None:
-            return
-        
-        # Convert board to 2D array
-        board_array = self.board_to_2d_array(self.board)
-        
-        # Generate new HTML
-        board_html = self.create_chess_board_html(large=True, board_state=board_array, highlight_squares=self.last_move_squares)
-        
-        # Update display
-        self.board_container.clear()
-        with self.board_container:
-            ui.html(board_html, sanitize=False)
 
     def go_to_first_move(self):
         """Go to the first move."""
         self.current_ply = 1
         self.update_board_to_ply(self.current_ply)
-        self.update_board_display()
+        self.send_full_position_to_js()
         self.display_moves()
 
     def go_to_previous_move(self):
@@ -391,7 +363,7 @@ class ChessAnalyzer:
         if self.current_ply > 0:
             self.current_ply -= 1
             self.update_board_to_ply(self.current_ply)
-            self.update_board_display()
+            self.send_full_position_to_js()
             self.display_moves()
 
     def go_to_next_move(self):
@@ -400,7 +372,7 @@ class ChessAnalyzer:
             if self.current_ply < len(self.moves):
                 self.current_ply += 1
                 self.update_board_to_ply(self.current_ply)
-                self.update_board_display()
+                self.send_full_position_to_js()
                 self.display_moves()
 
     def go_to_last_move(self):
@@ -408,14 +380,14 @@ class ChessAnalyzer:
         if self.current_game:
             self.current_ply = len(self.moves)
             self.update_board_to_ply(self.current_ply)
-            self.update_board_display()
+            self.send_full_position_to_js()
             self.display_moves()
 
     def jump_to_ply(self, ply):
         """Jump to a specific ply by clicking on a move."""
         self.current_ply = ply
         self.update_board_to_ply(self.current_ply)
-        self.update_board_display()
+        self.send_full_position_to_js()
         self.display_moves()
 
     def trigger_upload(self):
@@ -453,16 +425,9 @@ class ChessAnalyzer:
             # Update game title
             self.update_game_title()
 
-            # Display results
-            print(f"✓ Successfully loaded sample game")
-            print(f"Game headers: {dict(self.current_game.headers)}")
-            print(f"Number of moves: {len(self.moves)}")
-
             # Update the UI with moves and board
             self.display_moves()
-            self.update_board_display()
-
-            ui.notify(f"Successfully loaded sample game: Kasparov vs Topalov", type="positive")
+            self.send_full_position_to_js()
 
         except Exception as e:
             print(f"✗ Sample game load error: {e}")
@@ -511,16 +476,17 @@ class ChessAnalyzer:
                 ui.button('Upload PGN', icon='add', on_click=self.trigger_upload).classes('ml-auto')
 
             # Main content area
-            with ui.row().classes('flex-1 gap-4 px-4 py-2 overflow-hidden min-h-0'):
+            with ui.row().classes('gap-4 px-4 py-2 items-start flex-1 overflow-hidden'):
                 # Left side: Chess board
-                with ui.column().classes('flex-1 items-center justify-center bg-gray-800 rounded-lg p-2 overflow-hidden min-w-0'):
+                with ui.column().classes('items-center bg-gray-800 rounded-lg p-4'):
                     # Game title above board
                     self.game_title_label = ui.label('No game loaded').classes('text-lg font-bold text-center text-white mb-2')
 
-                    self.board_container = ui.column().classes('flex-1 items-center justify-center w-full h-full min-w-0 min-h-0')
-                    with self.board_container:
-                        board_html = self.create_chess_board_html(large=True, highlight_squares=set())
-                        ui.html(board_html, sanitize=False)
+                    # simple container – no flex-1 / h-full
+                    with ui.element('div').classes('flex items-center justify-center'):
+                        self.board_html = ui.html(BOARD_HTML, sanitize=False).classes('block')
+
+                    ui.run_javascript(BOARD_JS_INIT)
 
                 # Right side: Moves panel
                 with ui.column().classes('w-72 bg-gray-800 rounded-lg overflow-hidden flex flex-col h-full'):
@@ -536,6 +502,23 @@ class ChessAnalyzer:
                     self.controls_container = ui.column().classes('w-full border-t border-gray-700 p-4 flex-shrink-0')
                     with self.controls_container:
                         ui.label('Upload a PGN file to start analyzing').classes('text-gray-400 text-center')
+
+    def send_full_position_to_js(self):
+        """Send the current board position to the browser (no animation)."""
+        if self.board is None:
+            return
+
+        pos_dict = {
+            chess.square_name(square): piece.symbol()
+            for square, piece in self.board.piece_map().items()
+        }
+        position_json = json.dumps(pos_dict)
+
+        # Guard against chessAnim not being defined yet
+        ui.run_javascript(
+            f'if (window.chessAnim && window.chessAnim.setPosition) '
+            f'{{ window.chessAnim.setPosition({position_json}); }}'
+        )
 
 
 @ui.page('/')
