@@ -51,6 +51,7 @@ class ChessAnalyzer:
         self.last_move_squares = set()  # Track squares for last move highlighting
         self.game_title_label = None  # Label to display game title above board
         self.move_row_elements = {}  # Store references to move row elements for scrolling
+        self.upload_element = None  # Upload component for PGN files
 
     def make_jump_handler(self, ply):
         """Create a click handler that jumps to the specified ply."""
