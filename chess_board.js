@@ -22,12 +22,36 @@
         if (!canvas.width) return;
 
         const size = canvas.width / 8;
+
         for (let r = 0; r < 8; r++) {
             for (let f = 0; f < 8; f++) {
                 const light = (r + f) % 2 === 0;
                 ctx.fillStyle = light ? '#FEF3C7' : '#92400E';
                 ctx.fillRect(f * size, r * size, size, size);
             }
+        }
+
+        // Add coordinate labels only on bottom row and left column
+        ctx.font = (size * 0.2) + 'px system-ui';
+        ctx.textAlign = 'right';
+
+        // Bottom row: file letters (a-h) in bottom-right corner
+        ctx.textBaseline = 'bottom';
+        for (let f = 0; f < 8; f++) {
+            const file = String.fromCharCode(97 + f); // a-h
+            const light = (7 + f) % 2 === 0;
+            ctx.fillStyle = light ? '#000000' : '#FFFFFF';
+            ctx.fillText(file, f * size + size - 3, 7 * size + size - 3);
+        }
+
+        // Left column: rank numbers (8-1) in top-left corner
+        ctx.textBaseline = 'top';
+        ctx.textAlign = 'left';
+        for (let r = 0; r < 8; r++) {
+            const rank = (8 - r).toString(); // 8-1
+            const light = (r + 0) % 2 === 0;
+            ctx.fillStyle = light ? '#000000' : '#FFFFFF';
+            ctx.fillText(rank, 0 * size + 3, r * size + 3);
         }
     }
 
