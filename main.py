@@ -49,6 +49,8 @@ class ChessAnalyzer:
         self.moves = []  # Cache mainline moves to avoid recomputation
         self.san_moves = []  # Cache SAN notation for moves
         self.last_move_squares = set()  # Track squares for last move highlighting
+        self.game_title_label = None  # Label to display game title above board
+        self.move_row_elements = {}  # Store references to move row elements for scrolling
 
     def make_jump_handler(self, ply):
         """Create a click handler that jumps to the specified ply."""
@@ -218,6 +220,10 @@ class ChessAnalyzer:
             self.moves = list(self.current_game.mainline_moves())  # Cache moves to avoid recomputation
             self.san_moves = []  # Clear SAN cache for new game
             self.last_move_squares = set()  # Clear last move highlighting
+            self.move_row_elements.clear()  # Clear move row references
+
+            # Update game title
+            self.update_game_title()
 
             # Display results
             print(f"✓ Successfully processed: {filename}")
@@ -244,6 +250,7 @@ class ChessAnalyzer:
         # Clear existing content
         self.moves_container.clear()
         print("Cleared moves_container")
+        self.move_row_elements.clear()  # Clear stored row references
 
         if self.current_game is None:
             print("No current game")
@@ -263,8 +270,11 @@ class ChessAnalyzer:
                 white_ply = i
                 black_ply = i + 1
 
-                # Create move row
-                with ui.row().classes('w-full justify-between py-1'):
+                # Create move row and store reference for scrolling
+                move_row = ui.row().classes('w-full justify-between py-1')
+                self.move_row_elements[move_number] = move_row
+
+                with move_row:
                     ui.label(f"{move_number}.").classes('text-gray-300 w-8')
 
                     # White move highlighting
@@ -286,6 +296,15 @@ class ChessAnalyzer:
                     black_label = ui.label(black_move).classes(black_classes)
                     if black_ply < len(san_moves):
                         black_label.on('click', self.make_jump_handler(black_ply + 1))
+
+        # Auto-scroll to current move if we're not at the starting position
+        if self.current_ply > 0:
+            # Calculate which row contains the current move
+            # Each row has 2 moves (white and black), so row number = ((ply - 1) // 2) + 1
+            current_row_number = ((self.current_ply - 1) // 2) + 1
+            if current_row_number in self.move_row_elements:
+                # Use run_method to scroll the row into view
+                self.move_row_elements[current_row_number].run_method('scrollIntoView', {'behavior': 'smooth', 'block': 'start'})
 
         # Update controls visibility
         self.update_controls()
@@ -393,30 +412,117 @@ class ChessAnalyzer:
         self.update_board_display()
         self.display_moves()
 
+    def trigger_upload(self):
+        """Trigger the file upload dialog."""
+        if self.upload_element:
+            self.upload_element.run_method('pickFiles')
+
+    def update_game_title(self):
+        """Update the game title display above the chess board."""
+        if self.game_title_label is None:
+            return
+
+        if self.current_game:
+            white = self.current_game.headers.get('White', 'Unknown')
+            black = self.current_game.headers.get('Black', 'Unknown')
+            self.game_title_label.text = f"{white} vs {black}"
+        else:
+            self.game_title_label.text = "No game loaded"
+
+    def load_sample_game(self):
+        """Load the sample Kasparov vs Topalov game."""
+        try:
+            with open('kasparov_topalov_1999.pgn', 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            # Parse the chess game
+            self.current_game = self.parse_pgn_game(content)
+            self.current_ply = 0  # Reset to starting position
+            self.board = self.current_game.board()  # Initialize board at starting position
+            self.moves = list(self.current_game.mainline_moves())  # Cache moves to avoid recomputation
+            self.san_moves = []  # Clear SAN cache for new game
+            self.last_move_squares = set()  # Clear last move highlighting
+            self.move_row_elements.clear()  # Clear move row references
+
+            # Update game title
+            self.update_game_title()
+
+            # Display results
+            print(f"✓ Successfully loaded sample game")
+            print(f"Game headers: {dict(self.current_game.headers)}")
+            print(f"Number of moves: {len(self.moves)}")
+
+            # Update the UI with moves and board
+            self.display_moves()
+            self.update_board_display()
+
+            ui.notify(f"Successfully loaded sample game: Kasparov vs Topalov", type="positive")
+
+        except Exception as e:
+            print(f"✗ Sample game load error: {e}")
+            ui.notify(f"Failed to load sample game: {e}", type="negative")
+
     def create_ui(self):
         """Create and setup the user interface."""
+        # Add modern scrollbar styling
+        ui.add_css('''
+            .modern-scrollbar {
+                scrollbar-width: thin;
+                scrollbar-color: #4B5563 #1F2937;
+            }
+            .modern-scrollbar::-webkit-scrollbar {
+                width: 8px;
+            }
+            .modern-scrollbar::-webkit-scrollbar-track {
+                background: #1F2937;
+                border-radius: 4px;
+            }
+            .modern-scrollbar::-webkit-scrollbar-thumb {
+                background: #4B5563;
+                border-radius: 4px;
+                border: 1px solid #1F2937;
+            }
+            .modern-scrollbar::-webkit-scrollbar-thumb:hover {
+                background: #6B7280;
+            }
+            .modern-scrollbar::-webkit-scrollbar-thumb:active {
+                background: #9CA3AF;
+            }
+        ''')
+
         with ui.column().classes('fixed inset-0 w-screen h-screen bg-gray-900 text-white overflow-hidden'):
             # Header
             with ui.row().classes('w-full px-4 py-3 border-b border-gray-700 items-center gap-4 flex-shrink-0'):
                 ui.label('Chess Analyzer v0.1').classes('text-2xl font-bold')
-                ui.upload(on_upload=self.handle_upload, label="Upload PGN", auto_upload=True).classes('ml-auto')
+
+                # Hidden upload component
+                self.upload_element = ui.upload(on_upload=self.handle_upload, label="", auto_upload=True).props('accept=.pgn').classes('hidden')
+
+                # Sample game button
+                ui.button('Load Sample', icon='play_arrow', on_click=self.load_sample_game).classes('')
+
+                # Visible upload button
+                ui.button('Upload PGN', icon='add', on_click=self.trigger_upload).classes('ml-auto')
 
             # Main content area
             with ui.row().classes('flex-1 gap-4 px-4 py-2 overflow-hidden min-h-0'):
                 # Left side: Chess board
                 with ui.column().classes('flex-1 items-center justify-center bg-gray-800 rounded-lg p-2 overflow-hidden'):
+                    # Game title above board
+                    self.game_title_label = ui.label('No game loaded').classes('text-lg font-bold text-center text-white mb-2')
+
                     self.board_container = ui.column().classes('flex items-center justify-center')
                     with self.board_container:
                         board_html = self.create_chess_board_html(large=True, highlight_squares=set())
                         ui.html(board_html, sanitize=False)
 
                 # Right side: Moves panel
-                with ui.column().classes('w-96 bg-gray-800 rounded-lg overflow-hidden flex flex-col'):
+                with ui.column().classes('w-68 bg-gray-800 rounded-lg overflow-hidden flex flex-col'):
                     # Header
                     ui.label('Moves').classes('text-lg font-bold p-4 border-b border-gray-700')
 
                     # Moves list
-                    self.moves_container = ui.column().classes('flex-1 overflow-y-auto p-4 gap-2 max-h-96')
+                    self.moves_container = ui.column().classes('flex-1 w-full overflow-y-auto pl-4 pr-0 py-2 gap-2 max-h-96 modern-scrollbar')
                     with self.moves_container:
                         ui.label('No game loaded').classes('text-gray-400 text-center py-8')
 
