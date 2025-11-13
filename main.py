@@ -178,10 +178,10 @@ class ChessAnalyzer:
             # Show navigation buttons
             with self.controls_container:
                 with ui.row().classes('w-full justify-center gap-4'):
-                    ui.button('◀◀', on_click=self.go_to_first_move).classes('px-4 py-2')
-                    ui.button('◀', on_click=self.go_to_previous_move).classes('px-4 py-2')
-                    ui.button('▶', on_click=self.go_to_next_move).classes('px-4 py-2')
-                    ui.button('▶▶', on_click=self.go_to_last_move).classes('px-4 py-2')
+                    ui.button('◀◀', on_click=self.go_to_first_move).classes('px-4 py-2 chess-nav-btn chess-first-btn')
+                    ui.button('◀', on_click=self.go_to_previous_move).classes('px-4 py-2 chess-nav-btn chess-prev-btn')
+                    ui.button('▶', on_click=self.go_to_next_move).classes('px-4 py-2 chess-nav-btn chess-next-btn')
+                    ui.button('▶▶', on_click=self.go_to_last_move).classes('px-4 py-2 chess-nav-btn chess-last-btn')
         else:
             # Show upload message
             with self.controls_container:
@@ -297,6 +297,30 @@ class ChessAnalyzer:
             print(f"✗ Sample game load error: {e}")
             ui.notify(f"Failed to load sample game: {e}", type="negative")
 
+    def setup_keyboard_navigation(self):
+        """Set up keyboard event listeners for arrow key navigation."""
+        js_code = """
+        document.addEventListener('keydown', function(event) {
+            // Only handle arrow keys if no input/textarea is focused
+            if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
+                return;
+            }
+
+            if (event.key === 'ArrowLeft') {
+                event.preventDefault();
+                // Find and click the previous button
+                const prevBtn = document.querySelector('.chess-prev-btn');
+                if (prevBtn) prevBtn.click();
+            } else if (event.key === 'ArrowRight') {
+                event.preventDefault();
+                // Find and click the next button
+                const nextBtn = document.querySelector('.chess-next-btn');
+                if (nextBtn) nextBtn.click();
+            }
+        });
+        """
+        ui.run_javascript(js_code)
+
     def create_ui(self):
         """Create and setup the user interface."""
         # Add modern scrollbar styling
@@ -337,6 +361,9 @@ class ChessAnalyzer:
                         self.board_html = ui.html(BOARD_HTML, sanitize=False).classes('block')
 
                     ui.run_javascript(BOARD_JS_INIT)
+
+                    # Add keyboard navigation
+                    self.setup_keyboard_navigation()
 
                 # Right side: Moves panel
                 with ui.column().classes('w-72 bg-gray-800 rounded-lg overflow-hidden flex flex-col h-full'):
