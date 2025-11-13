@@ -321,10 +321,10 @@ class ChessAnalyzer:
             # Show navigation buttons
             with self.controls_container:
                 with ui.row().classes('w-full justify-center gap-4'):
-                    ui.button('⏮️', on_click=self.go_to_first_move).classes('px-4 py-2')
+                    ui.button('◀◀', on_click=self.go_to_first_move).classes('px-4 py-2')
                     ui.button('◀', on_click=self.go_to_previous_move).classes('px-4 py-2')
                     ui.button('▶', on_click=self.go_to_next_move).classes('px-4 py-2')
-                    ui.button('⏭️', on_click=self.go_to_last_move).classes('px-4 py-2')
+                    ui.button('▶▶', on_click=self.go_to_last_move).classes('px-4 py-2')
         else:
             # Show upload message
             with self.controls_container:
@@ -517,7 +517,7 @@ class ChessAnalyzer:
                         ui.html(board_html, sanitize=False)
 
                 # Right side: Moves panel
-                with ui.column().classes('w-68 bg-gray-800 rounded-lg overflow-hidden flex flex-col'):
+                with ui.column().classes('w-72 bg-gray-800 rounded-lg overflow-hidden flex flex-col'):
                     # Header
                     ui.label('Moves').classes('text-lg font-bold p-4 border-b border-gray-700')
 
