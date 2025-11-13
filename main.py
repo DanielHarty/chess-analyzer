@@ -54,14 +54,14 @@ class ChessAnalyzer:
         """Create a click handler that jumps to the specified ply."""
         return lambda e: self.jump_to_ply(ply)
 
-    def process_pgn_file(self, file_obj):
+    async def process_pgn_file(self, file_obj):
         """Extract and decode content from an uploaded file object."""
         filename = getattr(file_obj, 'name', 'unknown_file')
 
         # Try official NiceGUI APIs first
         if hasattr(file_obj, 'read'):
-            # File-like object with read method
-            content = file_obj.read().decode('utf-8')
+            # File-like object with read method (async in NiceGUI)
+            content = (await file_obj.read()).decode('utf-8')
             return filename, content
         elif hasattr(file_obj, 'content'):
             # Direct content attribute (bytes)
@@ -205,11 +205,11 @@ class ChessAnalyzer:
 
         return table_html
 
-    def handle_upload(self, event):
+    async def handle_upload(self, event):
         """Handle PGN file upload and parsing."""
         try:
             # Extract file content
-            filename, content = self.process_pgn_file(event.file)
+            filename, content = await self.process_pgn_file(event.file)
 
             # Parse the chess game
             self.current_game = self.parse_pgn_game(content)
