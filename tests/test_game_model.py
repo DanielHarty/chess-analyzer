@@ -292,5 +292,79 @@ class TestGameModel(unittest.TestCase):
 
         engine.close()
 
+    def test_piece_count_consistency(self):
+        """Test that piece counts are consistent after navigating forward and backward.
+        
+        This test specifically checks for the bug where rooks were missing after
+        navigating forward to the end and then backward to the start.
+        """
+        # Load the PGN file
+        pgn_path = ROOT / 'kasparov_topalov_1999.pgn'
+        pgn_text = pgn_path.read_text(encoding='utf-8')
+
+        # Create game model and load PGN
+        model = GameModel()
+        model.load_pgn_text(pgn_text)
+
+        # Record initial position (should be standard chess starting position)
+        model.go_to_start()
+        initial_fen = model.board.fen()
+        initial_piece_map = model.get_position_dict()
+        initial_piece_count = len(initial_piece_map)
+        
+        # Count pieces by type at the start
+        initial_piece_types = {}
+        for square, piece in initial_piece_map.items():
+            initial_piece_types[piece] = initial_piece_types.get(piece, 0) + 1
+        
+        # Standard starting position should have 32 pieces
+        self.assertEqual(initial_piece_count, 32, 
+                        f"Starting position should have 32 pieces, got {initial_piece_count}")
+        
+        # Standard starting position piece counts
+        expected_pieces = {
+            'R': 2, 'N': 2, 'B': 2, 'Q': 1, 'K': 1, 'P': 8,  # White
+            'r': 2, 'n': 2, 'b': 2, 'q': 1, 'k': 1, 'p': 8   # Black
+        }
+        self.assertEqual(initial_piece_types, expected_pieces,
+                        f"Starting position piece counts don't match standard chess setup")
+
+        # Navigate to the end
+        model.go_to_end()
+        end_fen = model.board.fen()
+        end_piece_map = model.get_position_dict()
+        
+        # Navigate back to the start
+        model.go_to_start()
+        final_fen = model.board.fen()
+        final_piece_map = model.get_position_dict()
+        final_piece_count = len(final_piece_map)
+        
+        # Count pieces by type at the end (after going forward and backward)
+        final_piece_types = {}
+        for square, piece in final_piece_map.items():
+            final_piece_types[piece] = final_piece_types.get(piece, 0) + 1
+        
+        # Verify FEN matches
+        self.assertEqual(final_fen, initial_fen,
+                        f"FEN after forward+backward doesn't match initial FEN.\n"
+                        f"Initial: {initial_fen}\n"
+                        f"Final:   {final_fen}")
+        
+        # Verify piece count
+        self.assertEqual(final_piece_count, initial_piece_count,
+                        f"Piece count after forward+backward navigation doesn't match.\n"
+                        f"Initial: {initial_piece_count}, Final: {final_piece_count}")
+        
+        # Verify piece types match (this specifically checks for missing rooks)
+        self.assertEqual(final_piece_types, initial_piece_types,
+                        f"Piece types don't match after forward+backward navigation.\n"
+                        f"Initial: {initial_piece_types}\n"
+                        f"Final:   {final_piece_types}")
+        
+        # Verify position dict matches exactly
+        self.assertEqual(final_piece_map, initial_piece_map,
+                        "Position after forward+backward navigation doesn't match initial position")
+
 if __name__ == '__main__':
     unittest.main()

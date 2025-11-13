@@ -111,11 +111,18 @@ class GameModel:
 
         # Get the move being undone (before decrementing ply)
         undone_move = self.moves[self.current_ply - 1]
-        piece = self.board.piece_at(undone_move.to_square) if self.board else None
+        
+        # Create a temporary board at the position BEFORE this move to check flags correctly
+        temp_board = self.current_game.board()
+        for i in range(self.current_ply - 1):
+            temp_board.push(self.moves[i])
+        
+        # Get piece from the BEFORE state (at from_square) for correct animation
+        piece = temp_board.piece_at(undone_move.from_square) if temp_board else None
 
-        # Collect flags for animation decisions
-        is_castling = self.board.is_castling(undone_move) if self.board else False
-        is_en_passant = self.board.is_en_passant(undone_move) if self.board else False
+        # Collect flags for animation decisions using the BEFORE state
+        is_castling = temp_board.is_castling(undone_move) if temp_board else False
+        is_en_passant = temp_board.is_en_passant(undone_move) if temp_board else False
         is_promotion = undone_move.promotion is not None
 
         self.current_ply -= 1
