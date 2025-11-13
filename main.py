@@ -3,11 +3,19 @@ Chess Game Analyzer
 A NiceGUI application for uploading and analyzing chess games in PGN format.
 """
 
-from nicegui import ui
+from nicegui import ui, app
 import os
 import json
 from pathlib import Path
 from game_model import GameModel
+from engine_adapter import StockfishEngine
+import platform
+
+ROOT = Path(__file__).resolve().parent
+if platform.system() == 'Windows':
+    ENGINE_PATH = ROOT / 'engines' / 'stockfish' / 'windows' / 'stockfish-windows-x86-64-avx2.exe'
+else:
+    ENGINE_PATH = ROOT / 'engines' / 'stockfish' / 'linux' / 'stockfish-linux-x86-64-avx2'
 
 # Canvas-based board: JS helper with setPosition({ square: "P", ... })
 BOARD_HTML = """
@@ -48,6 +56,11 @@ class ChessAnalyzer:
         self.game_title_label = None  # Label to display game title above board
         self.move_row_elements = {}  # Store references to move row elements for scrolling
         self.upload_element = None  # Upload component for PGN files
+
+        # Stockfish + eval bar UI references
+        self.engine = StockfishEngine(str(ENGINE_PATH))  # may fail gracefully if binary missing
+        self.eval_bar_fill = None
+        self.eval_label = None
 
     def make_jump_handler(self, ply):
         """Create a click handler that jumps to the specified ply."""
@@ -90,6 +103,7 @@ class ChessAnalyzer:
             # Update the UI with moves and board
             self.display_moves()
             self.send_full_position_to_js()
+            self.recompute_eval()  # NEW
 
         except Exception as e:
             print(f"✗ Upload error: {e}")
@@ -178,6 +192,7 @@ class ChessAnalyzer:
         self.model.go_to_start()
         self.send_full_position_to_js()
         self.display_moves()
+        self.recompute_eval()  # NEW
 
     def go_to_previous_move(self):
         """Go to the previous move."""
@@ -202,6 +217,7 @@ class ChessAnalyzer:
             self.send_full_position_to_js()
 
         self.display_moves()
+        self.recompute_eval()  # NEW
 
     def go_to_next_move(self):
         """Go to the next move."""
@@ -226,18 +242,21 @@ class ChessAnalyzer:
             self.send_full_position_to_js()
 
         self.display_moves()
+        self.recompute_eval()  # NEW
 
     def go_to_last_move(self):
         """Go to the last move."""
         self.model.go_to_end()
         self.send_full_position_to_js()
         self.display_moves()
+        self.recompute_eval()  # NEW
 
     def jump_to_ply(self, ply):
         """Jump to a specific ply by clicking on a move."""
         self.model.go_to_ply(ply)
         self.send_full_position_to_js()
         self.display_moves()
+        self.recompute_eval()  # NEW
 
     def trigger_upload(self):
         """Trigger the file upload dialog."""
@@ -271,6 +290,7 @@ class ChessAnalyzer:
             # Update the UI with moves and board
             self.display_moves()
             self.send_full_position_to_js()
+            self.recompute_eval()  # NEW
 
         except Exception as e:
             print(f"✗ Sample game load error: {e}")
@@ -297,7 +317,16 @@ class ChessAnalyzer:
 
             # Main content area
             with ui.row().classes('gap-4 px-4 py-2 items-start flex-1 overflow-hidden'):
-                # Left side: Chess board
+                # Left side: Eval bar
+                with ui.column().classes('items-center justify-center'):
+                    ui.label('Eval').classes('text-xs text-gray-400 mb-1')
+
+                    with ui.element('div').classes('eval-bar-container'):
+                        self.eval_bar_fill = ui.element('div').classes('eval-bar-fill')
+
+                    self.eval_label = ui.label('0.00').classes('eval-bar-label')
+
+                # Center: Chess board
                 with ui.column().classes('items-center bg-gray-800 rounded-lg p-4'):
                     # Game title above board
                     self.game_title_label = ui.label('No game loaded').classes('text-lg font-bold text-center text-white mb-2')
@@ -351,12 +380,65 @@ class ChessAnalyzer:
         )
         ui.run_javascript(js)
 
+    # ---------- Stockfish evaluation + bar update ----------
+
+    def recompute_eval(self):
+        """Re-run Stockfish on the current position and update the bar."""
+        if self.model.board is None or self.engine is None:
+            self.update_eval_bar(None)
+            return
+
+        cp = self.engine.evaluate_cp(self.model.board)
+        self.update_eval_bar(cp)
+
+    def update_eval_bar(self, cp: int | None):
+        """Update the eval bar and numeric label from a centipawn score."""
+        if self.eval_bar_fill is None or self.eval_label is None:
+            return
+
+        if cp is None:
+            # Unknown / engine failed
+            self.eval_bar_fill.style(
+                'height: 50%; bottom: 0; top: auto; background-color: #9CA3AF;'
+            )
+            self.eval_label.text = '--'
+            return
+
+        # Clamp crazy evals so the bar doesn't just slam to the top all the time
+        clamp = 800  # 8 pawns, roughly
+        cp_clamped = max(-clamp, min(clamp, cp))
+
+        # New mapping: 50% at equal, 100% at ±clamp
+        m = min(1.0, abs(cp_clamped) / clamp)      # 0..1
+        percent = 50 + m * 50                      # 50..100
+
+        # White advantage -> fill from bottom up in white
+        # Black advantage -> fill from top down in black
+        if cp_clamped >= 0:
+            style = (
+                f'height: {percent}%; '
+                f'bottom: 0; top: auto; '
+                f'background-color: #F9FAFB;'
+            )
+        else:
+            style = (
+                f'height: {percent}%; '
+                f'top: 0; bottom: auto; '
+                f'background-color: #020617;'  # near-black
+            )
+
+        self.eval_bar_fill.style(style)
+
+        # Show eval as something like "+0.34" (white perspective)
+        self.eval_label.text = f'{cp / 100:.2f}'
+
 
 @ui.page('/')
 def home():
     """Create the main application page."""
     analyzer = ChessAnalyzer()
     analyzer.create_ui()
+    app.on_shutdown(lambda: analyzer.engine.close())
 
 if __name__ in {"__main__", "__mp_main__"}:
     port = int(os.environ.get('PORT', 8080))
