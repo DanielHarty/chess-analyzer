@@ -64,6 +64,7 @@
     }
 
     let position = {}; // { "e2": "P", ... }
+    let currentAnimation = null; // { fromXY, toXY, pieceGlyph, startTime, durationMs }
 
     function draw() {
         if (!canvas.width) return;
@@ -76,8 +77,12 @@
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
+        // Draw all pieces except the animating one
         for (const square in position) {
             if (!Object.prototype.hasOwnProperty.call(position, square)) continue;
+
+            // Skip the animating piece (will be drawn separately)
+            if (currentAnimation && square === currentAnimation.fromSquare) continue;
 
             const piece = position[square];
             const glyph = pieceToUnicode(piece);
@@ -106,8 +111,93 @@
             ctx.fillText(glyph, cx, cy);
         }
 
+        // Draw animating piece if any
+        if (currentAnimation) {
+            const { fromXY, toXY, pieceGlyph, startTime, durationMs, isWhite } = currentAnimation;
+            const now = Date.now();
+            const t = Math.min(1, (now - startTime) / durationMs);
+
+            const cx = fromXY.cx + (toXY.cx - fromXY.cx) * t;
+            const cy = fromXY.cy + (toXY.cy - fromXY.cy) * t;
+
+            // Outline + shadow settings
+            ctx.lineWidth = size * 0.08;
+            ctx.shadowBlur = size * 0.15;
+
+            if (isWhite) {
+                // White pieces: dark outline + strong shadow
+                ctx.fillStyle = '#FFFFFF';
+                ctx.strokeStyle = 'rgba(0, 0, 0, 0.9)';
+                ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
+            } else {
+                // Black pieces: no outline + shadow
+                ctx.fillStyle = '#000000';
+                ctx.strokeStyle = 'transparent';
+                ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
+            }
+
+            ctx.strokeText(pieceGlyph, cx, cy);
+            ctx.fillText(pieceGlyph, cx, cy);
+        }
+
         ctx.shadowBlur = 0;
         ctx.shadowColor = 'transparent';
+    }
+
+    function animate() {
+        if (currentAnimation) {
+            const now = Date.now();
+            const t = Math.min(1, (now - currentAnimation.startTime) / currentAnimation.durationMs);
+
+            if (t >= 1) {
+                // Animation complete - update position and clear animation
+                position[currentAnimation.toSquare] = currentAnimation.pieceSymbol;
+                delete position[currentAnimation.fromSquare];
+                currentAnimation = null;
+                draw();
+            } else {
+                // Continue animation
+                draw();
+                requestAnimationFrame(animate);
+            }
+        }
+    }
+
+    function animateMove(opts) {
+        const { from, to, piece, durationMs = 200 } = opts;
+
+        // Cancel any existing animation
+        if (currentAnimation) {
+            // Complete the previous animation immediately
+            position[currentAnimation.toSquare] = currentAnimation.pieceSymbol;
+            delete position[currentAnimation.fromSquare];
+            currentAnimation = null;
+        }
+
+        // Remove piece from source square
+        delete position[from];
+
+        // Calculate coordinates
+        const fromXY = squareToXY(from);
+        const toXY = squareToXY(to);
+        const fromCenter = { cx: fromXY.x + fromXY.size / 2, cy: fromXY.y + fromXY.size / 2 };
+        const toCenter = { cx: toXY.x + toXY.size / 2, cy: toXY.y + toXY.size / 2 };
+
+        // Set up animation state
+        currentAnimation = {
+            fromSquare: from,
+            toSquare: to,
+            pieceSymbol: piece,
+            pieceGlyph: pieceToUnicode(piece),
+            isWhite: piece === piece.toUpperCase(),
+            fromXY: fromCenter,
+            toXY: toCenter,
+            startTime: Date.now(),
+            durationMs
+        };
+
+        // Start animation
+        animate();
     }
 
     function resize() {
@@ -121,9 +211,14 @@
     window.addEventListener('resize', resize);
     window.chessAnim = window.chessAnim || {};
     window.chessAnim.setPosition = function (pos) {
+        // Cancel any ongoing animation
+        if (currentAnimation) {
+            currentAnimation = null;
+        }
         position = pos || {};
         draw();
     };
+    window.chessAnim.animateMove = animateMove;
 
     resize();
 })();

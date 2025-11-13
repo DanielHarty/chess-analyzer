@@ -247,8 +247,8 @@ class ChessAnalyzer:
     
 
     def go_to_first_move(self):
-        """Go to the first move."""
-        self.current_ply = 1
+        """Go to the starting position (total board reset)."""
+        self.current_ply = 0
         self.update_board_to_ply(self.current_ply)
         self.send_full_position_to_js()
         self.display_moves()
@@ -265,9 +265,36 @@ class ChessAnalyzer:
         """Go to the next move."""
         if self.current_game:
             if self.current_ply < len(self.moves):
+                # Get the move before applying it
+                move = self.moves[self.current_ply]
+                piece = self.board.piece_at(move.from_square)
+
+                # Determine whether animation is safe for this move
+                should_animate = True
+                if (
+                    piece is None
+                    or self.board.is_castling(move)
+                    or self.board.is_en_passant(move)
+                    or move.promotion is not None
+                ):
+                    should_animate = False
+
+                # Apply the move to the board
+                self.board.push(move)
                 self.current_ply += 1
-                self.update_board_to_ply(self.current_ply)
-                self.send_full_position_to_js()
+
+                from_name = chess.square_name(move.from_square)
+                to_name = chess.square_name(move.to_square)
+
+                if should_animate and piece is not None:
+                    symbol = piece.symbol()
+                    self.animate_single_move(from_name, to_name, symbol)
+                else:
+                    self.send_full_position_to_js()
+
+                # Update last move highlighting
+                self.last_move_squares = {from_name, to_name}
+
                 self.display_moves()
 
     def go_to_last_move(self):
@@ -391,6 +418,20 @@ class ChessAnalyzer:
             f'if (window.chessAnim && window.chessAnim.setPosition) '
             f'{{ window.chessAnim.setPosition({position_json}); }}'
         )
+
+    def animate_single_move(self, from_square: str, to_square: str, symbol: str):
+        """Animate a single piece movement from one square to another."""
+        js = (
+            "if (window.chessAnim && window.chessAnim.animateMove) {"
+            f"  window.chessAnim.animateMove({{"
+            f"    from: '{from_square}',"
+            f"    to: '{to_square}',"
+            f"    piece: '{symbol}',"
+            f"    durationMs: 200"
+            f"  }});"
+            "}"
+        )
+        ui.run_javascript(js)
 
 
 @ui.page('/')
