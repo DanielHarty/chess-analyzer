@@ -413,20 +413,19 @@ class ChessAnalyzer:
         m = min(1.0, abs(cp_clamped) / clamp)      # 0..1
         percent = 50 + m * 50                      # 50..100
 
-        # White advantage -> fill from bottom up in white
-        # Black advantage -> fill from top down in black
+        # Always fill from bottom up in white
+        # White advantage: larger white bar from bottom
+        # Black advantage: smaller white bar from bottom
         if cp_clamped >= 0:
-            style = (
-                f'height: {percent}%; '
-                f'bottom: 0; top: auto; '
-                f'background-color: #F9FAFB;'
-            )
+            height_percent = percent
         else:
-            style = (
-                f'height: {percent}%; '
-                f'top: 0; bottom: auto; '
-                f'background-color: #020617;'  # near-black
-            )
+            height_percent = 100 - percent
+
+        style = (
+            f'height: {height_percent}%; '
+            f'bottom: 0; top: auto; '
+            f'background-color: #F9FAFB;'
+        )
 
         self.eval_bar_fill.style(style)
 
