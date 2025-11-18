@@ -11,6 +11,7 @@ from pathlib import Path
 from game_model import GameModel
 from global_engine import GlobalStockfishEngine, shutdown_global_engine
 import platform
+import plotly.graph_objects as go
 
 ROOT = Path(__file__).resolve().parent
 if platform.system() == 'Windows':
@@ -65,6 +66,9 @@ class ChessAnalyzer:
         
         # Loading indicator for evaluation progress
         self.eval_progress_label = None
+        
+        # Plotly evaluation chart
+        self.eval_chart = None
 
     def make_jump_handler(self, ply):
         """Create a click handler that jumps to the specified ply."""
@@ -108,6 +112,7 @@ class ChessAnalyzer:
             self.display_moves()
             self.send_full_position_to_js()
             self.recompute_eval()
+            self.update_eval_chart()
 
             # Start background evaluation
             self.start_evaluation_with_progress()
@@ -199,7 +204,8 @@ class ChessAnalyzer:
         self.model.go_to_start()
         self.send_full_position_to_js()
         self.display_moves()
-        self.recompute_eval()  # NEW
+        self.recompute_eval()
+        self.update_eval_chart()
 
     def animate_transition(self, start_pos, end_pos, result):
         """Send animation command with full state context."""
@@ -291,6 +297,7 @@ class ChessAnalyzer:
 
         self.display_moves()
         self.recompute_eval()
+        self.update_eval_chart()
 
     def go_to_next_move(self):
         """Go to the next move."""
@@ -306,21 +313,24 @@ class ChessAnalyzer:
         self.animate_transition(start_pos, end_pos, result)
 
         self.display_moves()
-        self.recompute_eval()  # NEW
+        self.recompute_eval()
+        self.update_eval_chart()
 
     def go_to_last_move(self):
         """Go to the last move."""
         self.model.go_to_end()
         self.send_full_position_to_js()
         self.display_moves()
-        self.recompute_eval()  # NEW
+        self.recompute_eval()
+        self.update_eval_chart()
 
     def jump_to_ply(self, ply):
         """Jump to a specific ply by clicking on a move."""
         self.model.go_to_ply(ply)
         self.send_full_position_to_js()
         self.display_moves()
-        self.recompute_eval()  # NEW
+        self.recompute_eval()
+        self.update_eval_chart()
 
     def trigger_upload(self):
         """Trigger the file upload dialog."""
@@ -355,6 +365,7 @@ class ChessAnalyzer:
             self.display_moves()
             self.send_full_position_to_js()
             self.recompute_eval()
+            self.update_eval_chart()
 
             # Start background evaluation
             self.start_evaluation_with_progress()
@@ -435,9 +446,14 @@ class ChessAnalyzer:
                     # Add keyboard navigation
                     self.setup_keyboard_navigation()
 
-                # Right side: Moves panel
-                with ui.column().classes('w-72 bg-gray-800 rounded-lg overflow-hidden flex flex-col h-full'):
-                    # Header
+                # Right side: Eval chart and moves panel
+                with ui.column().classes('w-96 bg-gray-800 rounded-lg overflow-hidden flex flex-col h-full'):
+                    # Evaluation chart at top
+                    with ui.column().classes('w-full p-3 border-b border-gray-700 flex-shrink-0'):
+                        initial_fig = self.create_eval_chart_figure()
+                        self.eval_chart = ui.plotly(initial_fig).classes('w-full')
+                    
+                    # Moves header
                     ui.label('Moves').classes('text-lg font-bold p-4 border-b border-gray-700 flex-shrink-0')
 
                     # Moves list
@@ -464,6 +480,101 @@ class ChessAnalyzer:
             f'{{ window.chessAnim.setPosition({position_json}); }}'
         )
 
+    # ---------- Plotly evaluation chart ----------
+    
+    def create_eval_chart_figure(self):
+        """Create a plotly figure for the evaluation chart."""
+        if not self.model.current_game:
+            # Empty chart when no game is loaded
+            fig = go.Figure()
+            fig.update_layout(
+                title="Evaluation",
+                xaxis_title="Move",
+                yaxis_title="Pawns",
+                template="plotly_dark",
+                height=220,
+                margin=dict(l=35, r=10, t=35, b=35),
+                plot_bgcolor='rgba(31, 41, 55, 1)',
+                paper_bgcolor='rgba(31, 41, 55, 1)',
+                font=dict(size=10),
+            )
+            return fig
+        
+        # Get evaluations and convert to pawns (divide by 100)
+        evals = self.model.evaluations
+        move_numbers = list(range(len(evals)))
+        
+        # Convert centipawns to pawns, handling None values
+        eval_pawns = []
+        valid_moves = []
+        for i, ev in enumerate(evals):
+            if ev is not None:
+                # Clamp extreme values for better visualization
+                clamped = max(-30, min(30, ev / 100))
+                eval_pawns.append(clamped)
+                valid_moves.append(i)
+        
+        # Create the line trace
+        fig = go.Figure()
+        
+        if eval_pawns:
+            fig.add_trace(go.Scatter(
+                x=valid_moves,
+                y=eval_pawns,
+                mode='lines',
+                name='Evaluation',
+                line=dict(color='#60A5FA', width=2),
+                hovertemplate='Move %{x}<br>Eval: %{y:.2f}<extra></extra>'
+            ))
+            
+            # Add a marker for the current position
+            current_ply = self.model.current_ply
+            if current_ply < len(evals) and evals[current_ply] is not None:
+                current_eval = max(-30, min(30, evals[current_ply] / 100))
+                fig.add_trace(go.Scatter(
+                    x=[current_ply],
+                    y=[current_eval],
+                    mode='markers',
+                    name='Current Position',
+                    marker=dict(size=10, color='#F59E0B', symbol='circle'),
+                    hovertemplate='Current<br>Move %{x}<br>Eval: %{y:.2f}<extra></extra>'
+                ))
+        
+        # Add zero line
+        fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
+        
+        fig.update_layout(
+            title="Evaluation",
+            xaxis_title="Move",
+            yaxis_title="Pawns",
+            template="plotly_dark",
+            height=220,
+            margin=dict(l=35, r=10, t=35, b=35),
+            plot_bgcolor='rgba(31, 41, 55, 1)',
+            paper_bgcolor='rgba(31, 41, 55, 1)',
+            hovermode='x unified',
+            showlegend=False,
+            font=dict(size=10),
+            xaxis=dict(
+                gridcolor='rgba(75, 85, 99, 0.3)',
+                dtick=5 if len(evals) > 30 else 2,
+            ),
+            yaxis=dict(
+                gridcolor='rgba(75, 85, 99, 0.3)',
+                range=[-10, 10] if max(abs(min(eval_pawns, default=0)), abs(max(eval_pawns, default=0))) <= 10 else None
+            ),
+        )
+        
+        return fig
+    
+    def update_eval_chart(self):
+        """Update the plotly evaluation chart."""
+        if self.eval_chart is None:
+            return
+        
+        fig = self.create_eval_chart_figure()
+        self.eval_chart.update_figure(fig)
+
     # ---------- Stockfish evaluation + bar update ----------
 
     def start_evaluation_with_progress(self):
@@ -482,10 +593,15 @@ class ChessAnalyzer:
             if current - 1 == self.model.current_ply:
                 self.recompute_eval()
             
+            # Update the plotly chart every few evaluations for performance
+            if current % 5 == 0 or current == total:
+                self.update_eval_chart()
+            
             # Hide progress when complete
             if current == total and self.eval_progress_label:
                 self.eval_progress_label.visible = False
                 self.recompute_eval()  # Final update
+                self.update_eval_chart()  # Final chart update
         
         self.model.start_background_evaluation(progress_callback)
 
