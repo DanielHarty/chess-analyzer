@@ -8,7 +8,7 @@ import os
 import json
 from pathlib import Path
 from game_model import GameModel
-from engine_adapter import StockfishEngine
+from global_engine import GlobalStockfishEngine, shutdown_global_engine
 import platform
 
 ROOT = Path(__file__).resolve().parent
@@ -58,8 +58,7 @@ class ChessAnalyzer:
         self.move_row_elements = {}  # Store references to move row elements for scrolling
         self.upload_element = None  # Upload component for PGN files
 
-        # Stockfish + eval bar UI references
-        self.engine = StockfishEngine(str(ENGINE_PATH))  # may fail gracefully if binary missing
+        # Stockfish + eval bar UI references (using global engine)
         self.eval_bar_fill = None
         self.eval_label = None
 
@@ -412,11 +411,12 @@ class ChessAnalyzer:
 
     def recompute_eval(self):
         """Re-run Stockfish on the current position and update the bar."""
-        if self.model.board is None or self.engine is None:
+        if self.model.board is None:
             self.update_eval_bar(None)
             return
 
-        cp = self.engine.evaluate_cp(self.model.board)
+        from global_engine import evaluate_position
+        cp = evaluate_position(self.model.board)
         self.update_eval_bar(cp)
 
     def update_eval_bar(self, cp: int | None):
@@ -463,9 +463,12 @@ class ChessAnalyzer:
 @ui.page('/')
 def home():
     """Create the main application page."""
+    # Initialize the global Stockfish engine
+    GlobalStockfishEngine(str(ENGINE_PATH))
+
     analyzer = ChessAnalyzer()
     analyzer.create_ui()
-    app.on_shutdown(lambda: analyzer.engine.close())
+    app.on_shutdown(shutdown_global_engine)
 
 if __name__ in {"__main__", "__mp_main__"}:
     port = int(os.environ.get('PORT', 8080))
