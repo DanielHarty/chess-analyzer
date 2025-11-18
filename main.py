@@ -261,21 +261,6 @@ class ChessAnalyzer:
             return
         end_pos = self.model.get_position_dict()
 
-        # Correct handling for undo:
-        # result["from"] is where the piece ENDED UP (start of move)
-        # result["to"] is where the piece STARTED (end of move)
-        # For undo, we move from result["from"] -> result["to"]
-        # Our animate_transition logic expects 'from' -> 'to' movement.
-        # But wait, animate_transition uses result["from"] as source.
-        # For step_back, result["from"] is the destination of the move (where piece is NOW),
-        # and result["to"] is the source (where piece was BEFORE).
-        # So we want to move from result["from"] -> result["to"].
-        # This matches animate_transition logic if we pass the result directly.
-        # Let's verify step_back return values in game_model.py:
-        # "from": to_name (destination of move being undone)
-        # "to": from_name (source of move being undone)
-        # So yes, result["from"] is the start of the undo animation.
-
         self.animate_transition(start_pos, end_pos, result)
 
         self.display_moves()
