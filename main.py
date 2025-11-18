@@ -6,6 +6,7 @@ A NiceGUI application for uploading and analyzing chess games in PGN format.
 from nicegui import ui, app
 import os
 import json
+import chess
 from pathlib import Path
 from game_model import GameModel
 from global_engine import GlobalStockfishEngine, shutdown_global_engine
@@ -194,52 +195,104 @@ class ChessAnalyzer:
         self.display_moves()
         self.recompute_eval()  # NEW
 
+    def animate_transition(self, start_pos, end_pos, result):
+        """Send animation command with full state context."""
+        move_type = 'simple'
+        details = {}
+
+        if result.get("is_castling"):
+            move_type = 'castling'
+            # Determine castling details from the move
+            king_from = result["from"]
+            king_to = result["to"]
+            piece = result["piece"]
+            is_white = piece.symbol().isupper()
+            
+            if is_white:
+                king_symbol = 'K'
+                rook_symbol = 'R'
+                if king_to == 'g1': # Kingside
+                    rook_from, rook_to = 'h1', 'f1'
+                else: # Queenside
+                    rook_from, rook_to = 'a1', 'd1'
+            else:
+                king_symbol = 'k'
+                rook_symbol = 'r'
+                if king_to == 'g8': # Kingside
+                    rook_from, rook_to = 'h8', 'f8'
+                else: # Queenside
+                    rook_from, rook_to = 'a8', 'd8'
+            
+            details = {
+                'kingFrom': king_from, 'kingTo': king_to,
+                'rookFrom': rook_from, 'rookTo': rook_to,
+                'kingSymbol': king_symbol, 'rookSymbol': rook_symbol
+            }
+
+        elif not result.get("is_en_passant") and not result.get("is_promotion") and result["piece"]:
+            # Simple move
+            details = {
+                'from': result["from"],
+                'to': result["to"],
+                'symbol': result["piece"].symbol()
+            }
+        else:
+            # Fallback for special moves (promotion/en passant) - just snap
+            self.send_full_position_to_js()
+            return
+
+        js_args = json.dumps({
+            'startPos': start_pos,
+            'endPos': end_pos,
+            'type': move_type,
+            'details': details
+        })
+        
+        ui.run_javascript(f'if(window.chessAnim && window.chessAnim.animateMoveWithState) window.chessAnim.animateMoveWithState({js_args});')
+
     def go_to_previous_move(self):
         """Go to the previous move."""
         if self.model.current_game is None:
             return
 
+        start_pos = self.model.get_position_dict()
         result = self.model.step_back()
         if result is None:
             return
+        end_pos = self.model.get_position_dict()
 
-        is_special = (
-            result["piece"] is None
-            or result["is_castling"]
-            or result["is_en_passant"]
-            or result["is_promotion"]
-        )
+        # Correct handling for undo:
+        # result["from"] is where the piece ENDED UP (start of move)
+        # result["to"] is where the piece STARTED (end of move)
+        # For undo, we move from result["from"] -> result["to"]
+        # Our animate_transition logic expects 'from' -> 'to' movement.
+        # But wait, animate_transition uses result["from"] as source.
+        # For step_back, result["from"] is the destination of the move (where piece is NOW),
+        # and result["to"] is the source (where piece was BEFORE).
+        # So we want to move from result["from"] -> result["to"].
+        # This matches animate_transition logic if we pass the result directly.
+        # Let's verify step_back return values in game_model.py:
+        # "from": to_name (destination of move being undone)
+        # "to": from_name (source of move being undone)
+        # So yes, result["from"] is the start of the undo animation.
 
-        if not is_special and result["piece"] is not None:
-            symbol = result["piece"].symbol()
-            self.animate_single_move(result["from"], result["to"], symbol)
-        else:
-            self.send_full_position_to_js()
+        self.animate_transition(start_pos, end_pos, result)
 
         self.display_moves()
-        self.recompute_eval()  # NEW
+        self.recompute_eval()
 
     def go_to_next_move(self):
         """Go to the next move."""
         if self.model.current_game is None:
             return
 
+        start_pos = self.model.get_position_dict()
         result = self.model.step_forward()
         if result is None:
             return
+        end_pos = self.model.get_position_dict()
 
-        is_special = (
-            result["piece"] is None
-            or result["is_castling"]
-            or result["is_en_passant"]
-            or result["is_promotion"]
-        )
-
-        if not is_special and result["piece"] is not None:
-            symbol = result["piece"].symbol()
-            self.animate_single_move(result["from"], result["to"], symbol)
-        else:
-            self.send_full_position_to_js()
+        self.animate_transition(start_pos, end_pos, result)
 
         self.display_moves()
         self.recompute_eval()  # NEW
@@ -392,20 +445,6 @@ class ChessAnalyzer:
             f'if (window.chessAnim && window.chessAnim.setPosition) '
             f'{{ window.chessAnim.setPosition({position_json}); }}'
         )
-
-    def animate_single_move(self, from_square: str, to_square: str, symbol: str):
-        """Animate a single piece movement from one square to another."""
-        js = (
-            "if (window.chessAnim && window.chessAnim.animateMove) {"
-            f"  window.chessAnim.animateMove({{"
-            f"    from: '{from_square}',"
-            f"    to: '{to_square}',"
-            f"    piece: '{symbol}',"
-            f"    durationMs: 200"
-            f"  }});"
-            "}"
-        )
-        ui.run_javascript(js)
 
     # ---------- Stockfish evaluation + bar update ----------
 

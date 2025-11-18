@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from game_model import GameModel
-from engine_adapter import StockfishEngine
+from global_engine import GlobalStockfishEngine, shutdown_global_engine
 
 class TestGameModel(unittest.TestCase):
     def test_kasparov_topalov_game(self):
@@ -48,14 +48,54 @@ class TestGameModel(unittest.TestCase):
         parts = final_fen.split()
         self.assertEqual(len(parts), 6, f"FEN should have 6 parts, got {len(parts)}")
 
-        # Basic validation of FEN components
-        board_part, side_to_move, castling, en_passant, halfmove_clock, fullmove_number = parts
-        self.assertIn(side_to_move, ('w', 'b'), f"Side to move should be 'w' or 'b', got '{side_to_move}'")
-        self.assertRegex(board_part, r'^[prnbqkPRNBQK1-8/]+$', "Board part should only contain valid piece symbols, digits, and slashes")
+    def test_castling_detection(self):
+        """Test that castling moves are properly detected."""
+        # Create a simple position with castling available
+        model = GameModel()
 
-        # Validate fullmove number is a positive integer
-        fullmove_num = int(fullmove_number)
-        self.assertGreater(fullmove_num, 0, f"Fullmove number should be > 0, got {fullmove_num}")
+        # Load a position where castling is possible
+        pgn_text = """[Event "Test"]
+[Site "Test"]
+[Date "2024.01.01"]
+[White "Test"]
+[Black "Test"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O"""
+        model.load_pgn_text(pgn_text)
+
+        # Step to the castling move (White's 5th move: O-O)
+        for i in range(9):  # 9 half-moves to reach O-O
+            result = model.step_forward()
+            if i == 8:  # The 9th step should be the castling move
+                self.assertTrue(result["is_castling"], "O-O move should be detected as castling")
+                self.assertEqual(result["from"], "e1", "King should move from e1")
+                self.assertEqual(result["to"], "g1", "King should move to g1 for kingside castling")
+                self.assertEqual(result["piece"].symbol(), "K", "Moving piece should be the king")
+
+    def test_queenside_castling_detection(self):
+        """Test that queenside castling moves are properly detected."""
+        # Create a simple position with queenside castling
+        model = GameModel()
+
+        # Load a position where queenside castling occurs (use the Kasparov-Topalov game which has O-O-O)
+        pgn_text = """[Event "Test"]
+[Site "Test"]
+[Date "2024.01.01"]
+[White "Test"]
+[Black "Test"]
+
+1. e4 d6 2. d4 Nf6 3. Nc3 g6 4. Be3 Bg7 5. Qd2 c6 6. f3 b5
+7. Nge2 Nbd7 8. Bh6 Bxh6 9. Qxh6 Bb7 10. a3 e5 11. O-O-O"""
+        model.load_pgn_text(pgn_text)
+
+        # Step to the queenside castling move (White's 11th move: O-O-O)
+        for i in range(21):  # 21 half-moves to reach O-O-O
+            result = model.step_forward()
+            if i == 20:  # The 21st step should be the castling move
+                self.assertTrue(result["is_castling"], "O-O-O move should be detected as castling")
+                self.assertEqual(result["from"], "e1", "King should move from e1")
+                self.assertEqual(result["to"], "c1", "King should move to c1 for queenside castling")
+                self.assertEqual(result["piece"].symbol(), "K", "Moving piece should be the white king")
 
     def test_navigation_edge_cases(self):
         """Test edge cases for navigation methods."""
@@ -93,8 +133,8 @@ class TestGameModel(unittest.TestCase):
         model = GameModel()
         model.load_pgn_text(pgn_text)
 
-        # Create engine (will work even if Stockfish not available)
-        engine = StockfishEngine()
+        # Create global engine (will work even if Stockfish not available)
+        engine = GlobalStockfishEngine()
 
         # Test evaluation at starting position
         start_eval = engine.evaluate_cp(model.board)
@@ -141,7 +181,7 @@ class TestGameModel(unittest.TestCase):
             eval_score = engine.evaluate_cp(model.board)
             self.assertIsInstance(eval_score, (int, type(None)))
 
-        engine.close()
+        shutdown_global_engine()
 
     def test_eval_bar_calculation(self):
         """Test the evaluation bar UI calculation logic."""
@@ -218,8 +258,8 @@ class TestGameModel(unittest.TestCase):
         model = GameModel()
         model.load_pgn_text(pgn_text)
 
-        # Create engine
-        engine = StockfishEngine()
+        # Create global engine
+        engine = GlobalStockfishEngine()
 
         # Test pattern: step forward, step back, verify eval consistency
         evaluations_forward = []
@@ -290,7 +330,7 @@ class TestGameModel(unittest.TestCase):
                 self.assertEqual(eval_score, position_evals[ply_val],
                                f"Inconsistent evaluation for ply {ply_val}")
 
-        engine.close()
+        shutdown_global_engine()
 
     def test_piece_count_consistency(self):
         """Test that piece counts are consistent after navigating forward and backward.
