@@ -229,17 +229,37 @@ class ChessAnalyzer:
                 'kingSymbol': king_symbol, 'rookSymbol': rook_symbol
             }
 
-        elif not result.get("is_en_passant") and not result.get("is_promotion") and result["piece"]:
-            # Simple move
+        elif result.get("is_en_passant") and result["piece"]:
+            # En passant: pawn moves diagonally, captures adjacent pawn
+            move_type = 'en_passant'
+
+            # Calculate captured square: same rank as from, same file as to
+            from_square = result["from"]  # e.g., "f5"
+            to_square = result["to"]      # e.g., "e6"
+
+            # Convert to coordinates
+            from_file = ord(from_square[0]) - ord('a')
+            from_rank = int(from_square[1]) - 1
+            to_file = ord(to_square[0]) - ord('a')
+
+            # Captured pawn is at (to_file, from_rank)
+            captured_file = chr(ord('a') + to_file)
+            captured_rank = str(from_rank + 1)
+            captured_square = captured_file + captured_rank
+
+            details = {
+                'pawnFrom': from_square,
+                'pawnTo': to_square,
+                'pawnSymbol': result["piece"].symbol(),
+                'capturedSquare': captured_square
+            }
+        elif result["piece"]:
+            # Simple move (including promotions)
             details = {
                 'from': result["from"],
                 'to': result["to"],
                 'symbol': result["piece"].symbol()
             }
-        else:
-            # Fallback for special moves (promotion/en passant) - just snap
-            self.send_full_position_to_js()
-            return
 
         js_args = json.dumps({
             'startPos': start_pos,
@@ -334,6 +354,64 @@ class ChessAnalyzer:
             print(f"✗ Sample game load error: {e}")
             ui.notify(f"Failed to load sample game: {e}", type="negative")
 
+    def load_en_passant_test(self):
+        """Load a test game that includes en passant moves."""
+        try:
+            # Create a simple PGN with en passant
+            test_pgn = """[Event "En Passant Test"]
+[Site "Test"]
+[Date "2024.01.01"]
+[White "Test"]
+[Black "Test"]
+[Result "*"]
+
+1. e4 d5 2. exd5 e5 3. dxe6
+"""
+
+            self.model.load_pgn_text(test_pgn)
+            self.move_row_elements.clear()  # Clear move row references
+
+            # Update game title
+            self.update_game_title()
+
+            # Update the UI with moves and board
+            self.display_moves()
+            self.send_full_position_to_js()
+            self.recompute_eval()  # NEW
+
+        except Exception as e:
+            print(f"✗ En passant test load error: {e}")
+            ui.notify(f"Failed to load en passant test: {e}", type="negative")
+
+    def load_promotion_test(self):
+        """Load a test game that includes pawn promotion moves."""
+        try:
+            # Create a simple PGN with pawn promotion
+            test_pgn = """[Event "Promotion Test"]
+[Site "Test"]
+[Date "2024.01.01"]
+[White "Test"]
+[Black "Test"]
+[Result "*"]
+
+1. e4 d5 2. exd5 e6 3. dxe6 fxe6 4. e7 f5 5. e8=Q
+"""
+
+            self.model.load_pgn_text(test_pgn)
+            self.move_row_elements.clear()  # Clear move row references
+
+            # Update game title
+            self.update_game_title()
+
+            # Update the UI with moves and board
+            self.display_moves()
+            self.send_full_position_to_js()
+            self.recompute_eval()  # NEW
+
+        except Exception as e:
+            print(f"✗ Promotion test load error: {e}")
+            ui.notify(f"Failed to load promotion test: {e}", type="negative")
+
     def setup_keyboard_navigation(self):
         """Set up keyboard event listeners for arrow key navigation."""
         js_code = """
@@ -373,6 +451,12 @@ class ChessAnalyzer:
 
                 # Sample game button
                 ui.button('Load Sample', icon='play_arrow', on_click=self.load_sample_game).classes('')
+
+                # Test en passant button
+                ui.button('Test En Passant', icon='science', on_click=self.load_en_passant_test).classes('')
+
+                # Test promotion button
+                ui.button('Test Promotion', icon='upgrade', on_click=self.load_promotion_test).classes('')
 
                 # Visible upload button
                 ui.button('Upload PGN', icon='add', on_click=self.trigger_upload).classes('ml-auto')

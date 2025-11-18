@@ -158,12 +158,21 @@
         } else if (moveType === 'castling') {
             // Castling: King and Rook moving
             const { kingFrom, kingTo, rookFrom, rookTo, kingSymbol, rookSymbol } = moveDetails;
-            
+
             hiddenSquares.add(kingFrom);
             hiddenSquares.add(rookFrom);
-            
+
             piecesToAnimate.push({ symbol: kingSymbol, from: kingFrom, to: kingTo });
             piecesToAnimate.push({ symbol: rookSymbol, from: rookFrom, to: rookTo });
+        } else if (moveType === 'en_passant') {
+            // En passant: Pawn moves diagonally, captured pawn disappears
+            const { pawnFrom, pawnTo, pawnSymbol, capturedSquare } = moveDetails;
+
+            hiddenSquares.add(pawnFrom);
+            hiddenSquares.add(capturedSquare); // Hide the captured pawn
+
+            piecesToAnimate.push({ symbol: pawnSymbol, from: pawnFrom, to: pawnTo });
+            // The captured pawn will simply disappear (not animated)
         }
 
         // Set immediate state to startPos (ensure we start from clean slate)
