@@ -380,13 +380,13 @@ class ChessAnalyzer:
             # Main content area
             with ui.row().classes('gap-4 px-4 py-2 items-start flex-1 overflow-hidden'):
                 # Left side: Eval bar
-                with ui.column().classes('items-center justify-center'):
+                with ui.column().classes('items-center justify-center w-16 flex-shrink-0'):
                     ui.label('Eval').classes('text-xs text-gray-400 mb-1')
 
                     with ui.element('div').classes('eval-bar-container'):
                         self.eval_bar_fill = ui.element('div').classes('eval-bar-fill')
 
-                    self.eval_label = ui.label('0.00').classes('eval-bar-label')
+                    self.eval_label = ui.label('0.00').classes('eval-bar-label text-center w-full')
 
                 # Center: Chess board
                 with ui.column().classes('items-center bg-gray-800 rounded-lg p-4'):

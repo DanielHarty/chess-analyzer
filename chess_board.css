@@ -48,4 +48,6 @@
     font-size: 0.75rem;  /* text-xs */
     color: #D1D5DB;      /* gray-300 */
     margin-top: 0.25rem;
+    font-family: 'Courier New', monospace;
+    min-width: 32px;
 }
