@@ -28,16 +28,16 @@ class GlobalStockfishEngine:
 
     _instance: Optional['GlobalStockfishEngine'] = None
     _engine_path: str = DEFAULT_STOCKFISH_PATH
-    _time_limit: float = 0.2
+    _time_limit: float = 0.05  # Reduced for faster batch evaluation
 
-    def __new__(cls, path: str = DEFAULT_STOCKFISH_PATH, time_limit: float = 0.2) -> 'GlobalStockfishEngine':
+    def __new__(cls, path: str = DEFAULT_STOCKFISH_PATH, time_limit: float = 0.05) -> 'GlobalStockfishEngine':
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._engine_path = path
             cls._time_limit = time_limit
         return cls._instance
 
-    def __init__(self, path: str = DEFAULT_STOCKFISH_PATH, time_limit: float = 0.2):
+    def __init__(self, path: str = DEFAULT_STOCKFISH_PATH, time_limit: float = 0.05):
         """Initialize the global engine (only called once due to singleton pattern)."""
         if not hasattr(self, '_initialized'):
             self._initialized = True

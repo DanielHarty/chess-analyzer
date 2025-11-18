@@ -3,6 +3,9 @@
 import io
 import chess
 import chess.pgn
+import asyncio
+from typing import Callable
+from global_engine import evaluate_position
 
 class GameModel:
     """Pure chess game state & navigation. No GUI, no JS."""
@@ -14,6 +17,9 @@ class GameModel:
         self.san_moves: list[str] = []
         self.current_ply: int = 0
         self.last_move_squares: set[str] = set()
+        self.evaluations: list[int | None] = []  # Precalculated evaluations for each ply
+        self._eval_task: asyncio.Task | None = None  # Background evaluation task
+        self._eval_complete: bool = False  # Flag to track if evaluation is complete
 
     # ---------- Loading & parsing ----------
 
@@ -31,6 +37,55 @@ class GameModel:
         self.san_moves = []        # lazy-computed
         self.current_ply = 0
         self.last_move_squares = set()
+        self._eval_complete = False
+
+        # Initialize evaluations with None placeholders
+        self.evaluations = [None] * (len(self.moves) + 1)
+
+    def start_background_evaluation(self, progress_callback: Callable[[int, int], None] | None = None) -> None:
+        """Start background evaluation of all positions in the game.
+        
+        Args:
+            progress_callback: Optional callback function(current, total) called after each evaluation
+        """
+        if self._eval_task is not None:
+            self._eval_task.cancel()
+        
+        self._eval_task = asyncio.create_task(self._precalculate_evaluations_async(progress_callback))
+
+    async def _precalculate_evaluations_async(self, progress_callback: Callable[[int, int], None] | None = None) -> None:
+        """Precalculate evaluations for all positions in the game asynchronously."""
+        if not self.current_game:
+            self.evaluations = []
+            self._eval_complete = True
+            return
+
+        try:
+            # Start with the initial position
+            board = self.current_game.board()
+            total = len(self.moves) + 1
+            
+            # Evaluate starting position
+            self.evaluations[0] = await asyncio.to_thread(evaluate_position, board)
+            if progress_callback:
+                progress_callback(1, total)
+
+            # Evaluate each position after each move
+            for i, move in enumerate(self.moves, start=1):
+                board.push(move)
+                eval_score = await asyncio.to_thread(evaluate_position, board)
+                self.evaluations[i] = eval_score
+                
+                if progress_callback:
+                    progress_callback(i + 1, total)
+                
+                # Yield control to allow UI updates
+                await asyncio.sleep(0)
+            
+            self._eval_complete = True
+        except asyncio.CancelledError:
+            # Task was cancelled, that's fine
+            pass
 
     def ensure_san_moves(self) -> list[str]:
         """Return SAN moves, computing and caching if needed."""
@@ -174,3 +229,9 @@ class GameModel:
             rows.append((move_no, white, black))
 
         return rows
+
+    def get_current_evaluation(self) -> int | None:
+        """Return the precalculated evaluation for the current position."""
+        if self.current_ply < len(self.evaluations):
+            return self.evaluations[self.current_ply]
+        return None

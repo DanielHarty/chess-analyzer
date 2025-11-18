@@ -406,5 +406,77 @@ class TestGameModel(unittest.TestCase):
         self.assertEqual(final_piece_map, initial_piece_map,
                         "Position after forward+backward navigation doesn't match initial position")
 
+    def test_precalculated_evaluations(self):
+        """Test that background evaluations work correctly."""
+        import asyncio
+        
+        # Load the PGN file
+        pgn_path = ROOT / 'kasparov_topalov_1999.pgn'
+        pgn_text = pgn_path.read_text(encoding='utf-8')
+
+        # Create game model and load PGN
+        model = GameModel()
+        model.load_pgn_text(pgn_text)
+
+        # Verify evaluations list is initialized with None values
+        self.assertEqual(len(model.evaluations), len(model.moves) + 1,
+                        f"Expected {len(model.moves) + 1} evaluation slots, got {len(model.evaluations)}")
+
+        # Create engine for comparison
+        engine = GlobalStockfishEngine()
+
+        # Start background evaluation and wait for completion
+        async def run_evaluation():
+            progress_count = [0]
+            
+            def progress_callback(current, total):
+                progress_count[0] = current
+            
+            model.start_background_evaluation(progress_callback)
+            
+            # Wait for completion
+            if model._eval_task:
+                await model._eval_task
+            
+            return progress_count[0]
+        
+        # Run the async evaluation
+        final_count = asyncio.run(run_evaluation())
+        
+        # Verify all positions were evaluated
+        self.assertEqual(final_count, len(model.moves) + 1,
+                        f"Expected {len(model.moves) + 1} evaluations, got {final_count}")
+        
+        # Verify evaluation complete flag is set
+        self.assertTrue(model._eval_complete, "Evaluation should be marked as complete")
+
+        # Check that cached evaluations match live evaluations for key positions
+        test_plys = [0, 5, 10, 15, 20, 25, 30, 35, 40, len(model.moves)]
+
+        for ply in test_plys:
+            if ply > len(model.moves):
+                continue
+
+            # Go to the position
+            model.go_to_ply(ply)
+
+            # Get cached evaluation
+            cached_eval = model.get_current_evaluation()
+
+            # Get live evaluation
+            live_eval = engine.evaluate_cp(model.board)
+
+            # They should match
+            self.assertEqual(cached_eval, live_eval,
+                           f"Cached evaluation {cached_eval} doesn't match live evaluation {live_eval} at ply {ply}")
+
+        # Test that get_current_evaluation returns None for invalid plys (though this shouldn't happen in normal use)
+        original_ply = model.current_ply
+        model.current_ply = 9999  # Invalid ply
+        self.assertIsNone(model.get_current_evaluation())
+        model.current_ply = original_ply  # Restore
+
+        shutdown_global_engine()
+
 if __name__ == '__main__':
     unittest.main()

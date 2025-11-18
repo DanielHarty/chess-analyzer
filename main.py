@@ -62,6 +62,9 @@ class ChessAnalyzer:
         # Stockfish + eval bar UI references (using global engine)
         self.eval_bar_fill = None
         self.eval_label = None
+        
+        # Loading indicator for evaluation progress
+        self.eval_progress_label = None
 
     def make_jump_handler(self, ply):
         """Create a click handler that jumps to the specified ply."""
@@ -104,7 +107,10 @@ class ChessAnalyzer:
             # Update the UI with moves and board
             self.display_moves()
             self.send_full_position_to_js()
-            self.recompute_eval()  # NEW
+            self.recompute_eval()
+
+            # Start background evaluation
+            self.start_evaluation_with_progress()
 
         except Exception as e:
             print(f"✗ Upload error: {e}")
@@ -348,7 +354,10 @@ class ChessAnalyzer:
             # Update the UI with moves and board
             self.display_moves()
             self.send_full_position_to_js()
-            self.recompute_eval()  # NEW
+            self.recompute_eval()
+
+            # Start background evaluation
+            self.start_evaluation_with_progress()
 
         except Exception as e:
             print(f"✗ Sample game load error: {e}")
@@ -396,6 +405,10 @@ class ChessAnalyzer:
 
                 # Visible upload button
                 ui.button('Upload PGN', icon='add', on_click=self.trigger_upload).classes('ml-auto')
+                
+                # Progress indicator
+                self.eval_progress_label = ui.label('Analyzing positions: 0%').classes('text-sm text-gray-400 ml-4')
+                self.eval_progress_label.visible = False
 
             # Main content area
             with ui.row().classes('gap-4 px-4 py-2 items-start flex-1 overflow-hidden'):
@@ -453,14 +466,36 @@ class ChessAnalyzer:
 
     # ---------- Stockfish evaluation + bar update ----------
 
+    def start_evaluation_with_progress(self):
+        """Start background evaluation and show progress."""
+        if self.eval_progress_label:
+            self.eval_progress_label.visible = True
+            self.eval_progress_label.text = "Analyzing positions: 0%"
+        
+        def progress_callback(current: int, total: int):
+            """Update progress indicator."""
+            percent = int((current / total) * 100)
+            if self.eval_progress_label:
+                self.eval_progress_label.text = f"Analyzing positions: {percent}%"
+            
+            # Update eval bar for current position if we're viewing it
+            if current - 1 == self.model.current_ply:
+                self.recompute_eval()
+            
+            # Hide progress when complete
+            if current == total and self.eval_progress_label:
+                self.eval_progress_label.visible = False
+                self.recompute_eval()  # Final update
+        
+        self.model.start_background_evaluation(progress_callback)
+
     def recompute_eval(self):
-        """Re-run Stockfish on the current position and update the bar."""
+        """Update the eval bar using precalculated evaluations."""
         if self.model.board is None:
             self.update_eval_bar(None)
             return
 
-        from global_engine import evaluate_position
-        cp = evaluate_position(self.model.board)
+        cp = self.model.get_current_evaluation()
         self.update_eval_bar(cp)
 
     def update_eval_bar(self, cp: int | None):
