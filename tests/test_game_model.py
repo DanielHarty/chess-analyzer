@@ -10,6 +10,14 @@ from game_model import GameModel
 from global_engine import GlobalStockfishEngine, shutdown_global_engine
 
 class TestGameModel(unittest.TestCase):
+    def _collect_reference_fens(self, model: GameModel) -> list[str]:
+        board = model.current_game.board()
+        fens = [board.fen()]
+        for move in model.moves:
+            board.push(move)
+            fens.append(board.fen())
+        return fens
+
     def test_kasparov_topalov_game(self):
         """Test loading and stepping through the Kasparov-Topalov 1999 game."""
         # Load the PGN file
@@ -182,6 +190,59 @@ class TestGameModel(unittest.TestCase):
             self.assertIsInstance(eval_score, (int, type(None)))
 
         shutdown_global_engine()
+
+    def test_fast_navigation_regression(self):
+        """Rapid forward/backward navigation should keep board state consistent."""
+        pgn_path = ROOT / 'kasparov_topalov_1999.pgn'
+        pgn_text = pgn_path.read_text(encoding='utf-8')
+
+        model = GameModel()
+        model.load_pgn_text(pgn_text)
+
+        reference_fens = self._collect_reference_fens(model)
+        total_moves = len(model.moves)
+
+        for _ in range(total_moves):
+            result = model.step_forward()
+            self.assertIsNotNone(result)
+            self.assertEqual(model.board.fen(), reference_fens[model.current_ply])
+
+        self.assertEqual(model.current_ply, total_moves)
+
+        for expected_ply in reversed(range(total_moves)):
+            step_info = model.step_back()
+            self.assertIsNotNone(step_info)
+            self.assertEqual(model.current_ply, expected_ply)
+            self.assertEqual(model.board.fen(), reference_fens[expected_ply])
+
+        self.assertEqual(model.current_ply, 0)
+
+    def test_go_to_ply_random_access_consistency(self):
+        """Random access via go_to_ply should match reference positions."""
+        pgn_path = ROOT / 'kasparov_topalov_1999.pgn'
+        pgn_text = pgn_path.read_text(encoding='utf-8')
+
+        model = GameModel()
+        model.load_pgn_text(pgn_text)
+
+        reference_fens = self._collect_reference_fens(model)
+        total_plys = len(model.moves)
+
+        for ply in range(total_plys + 1):
+            model.go_to_ply(ply)
+            self.assertEqual(model.board.fen(), reference_fens[ply])
+
+        for ply in reversed(range(total_plys + 1)):
+            model.go_to_ply(ply)
+            self.assertEqual(model.board.fen(), reference_fens[ply])
+
+        import random
+
+        random.seed(1234)
+        jumps = [random.randrange(0, total_plys + 1) for _ in range(50)]
+        for ply in jumps:
+            model.go_to_ply(ply)
+            self.assertEqual(model.board.fen(), reference_fens[ply])
 
     def test_eval_bar_calculation(self):
         """Test the evaluation bar UI calculation logic."""

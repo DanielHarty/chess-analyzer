@@ -20,6 +20,7 @@ class GameModel:
         self.evaluations: list[int | None] = []  # Precalculated evaluations for each ply
         self._eval_task: asyncio.Task | None = None  # Background evaluation task
         self._eval_complete: bool = False  # Flag to track if evaluation is complete
+        self._initial_fen: str | None = None
 
     # ---------- Loading & parsing ----------
 
@@ -32,7 +33,9 @@ class GameModel:
             raise ValueError("No game found in PGN")
 
         self.current_game = game
-        self.board = game.board()
+        initial_board = game.board()
+        self._initial_fen = initial_board.fen()
+        self.board = chess.Board(self._initial_fen)
         self.moves = list(game.mainline_moves())
         self.san_moves = []        # lazy-computed
         self.current_ply = 0
@@ -109,14 +112,19 @@ class GameModel:
 
     def go_to_ply(self, ply: int) -> None:
         """Set board to given ply (0 = starting position)."""
-        if not self.current_game:
+        if not self.current_game or not self.board:
             return
 
         ply = max(0, min(ply, len(self.moves)))
-        self.board = self.current_game.board()
+        if ply == self.current_ply:
+            return
 
-        for i in range(ply):
-            self.board.push(self.moves[i])
+        if ply > self.current_ply:
+            for i in range(self.current_ply, ply):
+                self.board.push(self.moves[i])
+        else:
+            for _ in range(self.current_ply - ply):
+                self.board.pop()
 
         self.current_ply = ply
 
@@ -164,27 +172,29 @@ class GameModel:
         if not self.current_game or self.current_ply == 0:
             return None
 
-        # Get the move being undone (before decrementing ply)
-        undone_move = self.moves[self.current_ply - 1]
-        
-        # Create a temporary board at the position BEFORE this move to check flags correctly
-        temp_board = self.current_game.board()
-        for i in range(self.current_ply - 1):
-            temp_board.push(self.moves[i])
-        
-        # Get piece from the BEFORE state (at from_square) for correct animation
-        piece = temp_board.piece_at(undone_move.from_square) if temp_board else None
+        if not self.board:
+            return None
 
-        # Collect flags for animation decisions using the BEFORE state
-        is_castling = temp_board.is_castling(undone_move) if temp_board else False
-        is_en_passant = temp_board.is_en_passant(undone_move) if temp_board else False
+        undone_move = self.board.peek()
+        piece = self.board.piece_at(undone_move.to_square)
+        is_castling = self.board.is_castling(undone_move)
+        is_en_passant = self.board.is_en_passant(undone_move)
         is_promotion = undone_move.promotion is not None
 
+        self.board.pop()
         self.current_ply -= 1
-        self.go_to_ply(self.current_ply)
 
         from_name = chess.square_name(undone_move.from_square)
         to_name = chess.square_name(undone_move.to_square)
+
+        if self.current_ply > 0:
+            last_move = self.moves[self.current_ply - 1]
+            self.last_move_squares = {
+                chess.square_name(last_move.from_square),
+                chess.square_name(last_move.to_square),
+            }
+        else:
+            self.last_move_squares = set()
 
         return {
             "move": undone_move,
