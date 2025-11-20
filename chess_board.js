@@ -28,6 +28,10 @@
 
     let position = {}; // { "e2": "P", ... }
     let currentAnimation = null; // State for active animation
+    let highlightedSquares = new Set(); // Set of squares to highlight
+    let legalMoveSquares = new Set(); // Set of squares to show legal move circles
+    let draggedPiece = null; // { square, piece, offsetX, offsetY }
+    let isDragging = false;
 
     function drawBoard() {
         if (!canvas.width) return;
@@ -35,9 +39,32 @@
 
         for (let r = 0; r < 8; r++) {
             for (let f = 0; f < 8; f++) {
-                const light = (r + f) % 2 === 0;
-                ctx.fillStyle = light ? '#FEF3C7' : '#92400E';
+                const file = String.fromCharCode(97 + f);
+                const rank = 8 - r;
+                const square = file + rank;
+
+                // Check if this square should be highlighted
+                if (highlightedSquares.has(square)) {
+                    ctx.fillStyle = '#FFFF00'; // Yellow highlight
+                } else {
+                    const light = (r + f) % 2 === 0;
+                    ctx.fillStyle = light ? '#FEF3C7' : '#92400E';
+                }
                 ctx.fillRect(f * size, r * size, size, size);
+
+                // Draw legal move circles
+                if (legalMoveSquares.has(square)) {
+                    ctx.save();
+                    ctx.globalAlpha = 0.7;
+                    ctx.fillStyle = '#808080'; // Grey circle
+                    const centerX = f * size + size / 2;
+                    const centerY = r * size + size / 2;
+                    const radius = size * 0.15; // Circle radius relative to square size
+                    ctx.beginPath();
+                    ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+                    ctx.fill();
+                    ctx.restore();
+                }
             }
         }
 
@@ -64,8 +91,18 @@
 
     function drawPiece(piece, x, y, size) {
         const glyph = pieceToUnicode(piece);
-        const cx = x + size / 2;
-        const cy = y + size / 2;
+        const cx = x + size / 2; // This assumes x,y is top-left of square
+        const cy = y + size / 2; 
+        
+        // HOWEVER, if we are dragging, x,y might be the center?
+        // The caller of drawPiece passes coordinates.
+        // For grid: x=file*size, y=rank*size -> top-left. So cx=x+size/2 is correct.
+        // For dragging: we pass mouseX, mouseY. We want the piece centered there.
+        // So if we are dragging, we should treat x,y as center.
+        
+        // Let's check if we are drawing the dragged piece
+        // Actually, simpler to adjust the caller for drag to pass top-left
+        
         const isWhite = (piece === piece.toUpperCase());
 
         ctx.font = (size * 0.7) + 'px system-ui';
@@ -73,7 +110,24 @@
         ctx.textBaseline = 'middle';
         ctx.lineWidth = size * 0.08;
         ctx.shadowBlur = size * 0.15;
-
+        
+        // We draw at cx, cy which is center. 
+        // If we pass x,y as center, we should use x,y directly.
+        // But static pieces pass x,y as top-left.
+        
+        // Let's change drawPiece to take cx, cy (center coordinates) directly? 
+        // Or we handle it in the caller.
+        
+        // Let's stick to x,y being top-left corner for consistency, 
+        // EXCEPT when we call it for dragged piece, we'll pass (mouseX - size/2, mouseY - size/2)
+        
+        // Wait, let's look at how it uses x,y:
+        // const cx = x + size / 2;
+        // const cy = y + size / 2;
+        // ctx.strokeText(glyph, cx, cy);
+        
+        // So drawPiece expects x,y to be TOP-LEFT of the bounding box.
+        
         if (isWhite) {
             ctx.fillStyle = '#FFFFFF';
             ctx.strokeStyle = 'rgba(0, 0, 0, 0.9)';
@@ -108,9 +162,23 @@
                 continue;
             }
 
+            // Skip the dragged piece - we'll draw it separately
+            if (draggedPiece && draggedPiece.square === square) {
+                continue;
+            }
+
             const piece = position[square];
             const { x, y, size } = squareToXY(square);
             drawPiece(piece, x, y, size);
+        }
+
+        // Draw dragged piece centered at cursor position
+        if (draggedPiece && isDragging) {
+            // drawPiece expects top-left coordinate
+            // draggedPiece.x, draggedPiece.y are mouse coordinates (center)
+            const drawX = draggedPiece.x - draggedPiece.size / 2;
+            const drawY = draggedPiece.y - draggedPiece.size / 2;
+            drawPiece(draggedPiece.piece, drawX, drawY, draggedPiece.size);
         }
 
         // Draw animating pieces
@@ -199,10 +267,12 @@
 
     window.addEventListener('resize', resize);
     window.chessAnim = window.chessAnim || {};
-    
+
     window.chessAnim.setPosition = function (pos) {
         currentAnimation = null;
         position = pos || {};
+        draggedPiece = null;
+        isDragging = false;
         draw();
     };
 
@@ -211,6 +281,33 @@
     window.chessAnim.animateMoveWithState = function (args) {
         animateTransition(args.startPos, args.endPos, args.type, args.details);
     };
+
+    window.chessAnim.setHighlightedSquares = function (squares) {
+        highlightedSquares = new Set(squares || []);
+        draw();
+    };
+
+    window.chessAnim.setLegalMoveCircles = function (squares) {
+        legalMoveSquares = new Set(squares || []);
+        draw();
+    };
+
+    window.chessAnim.draw = draw;
+
+    // Expose state for external access
+    Object.defineProperty(window.chessAnim, 'position', {
+        get: function() { return position; }
+    });
+
+    Object.defineProperty(window.chessAnim, 'draggedPiece', {
+        get: function() { return draggedPiece; },
+        set: function(value) { draggedPiece = value; }
+    });
+
+    Object.defineProperty(window.chessAnim, 'isDragging', {
+        get: function() { return isDragging; },
+        set: function(value) { isDragging = value; }
+    });
 
     resize();
 })();

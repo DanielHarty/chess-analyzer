@@ -6,6 +6,7 @@ A visual chess board component with JavaScript integration.
 from nicegui import ui
 from pathlib import Path
 import json
+import chess
 
 
 class ChessBoard:
@@ -30,6 +31,9 @@ class ChessBoard:
         self.game_title_label = None
         self.board_html = None
         self.board_js_init = None
+        self.selected_square = None  # Track selected piece square
+        self.legal_moves = set()     # Track legal move squares
+        self.on_piece_selected = None # Callback for piece selection
 
         # Load JavaScript and CSS
         self._load_assets()
@@ -63,12 +67,16 @@ class ChessBoard:
             self.game_title_label = ui.label('No game loaded').classes('text-lg font-bold text-center text-white mb-2')
 
             # Chess board container
-            with ui.element('div').classes('flex items-center justify-center'):
+            with ui.element('div').classes('flex items-center justify-center') \
+                    .on('piece_clicked', self.handle_piece_click):
                 self.board_html = ui.html(self.BOARD_HTML, sanitize=False).classes('block')
 
             # Initialize JavaScript
             if self.board_js_init:
                 ui.run_javascript(self.board_js_init)
+
+            # Add click handler for board
+            self.setup_board_click_handler()
 
             # Add keyboard navigation
             self.setup_keyboard_navigation()
@@ -99,6 +107,137 @@ class ChessBoard:
         """
         ui.run_javascript(js_code)
 
+    def setup_board_click_handler(self):
+        """Set up drag event listeners for the chess board."""
+        js_code = """
+        const chessBoard = document.getElementById('chess_board_root');
+        const canvas = document.getElementById('chess_board_canvas');
+
+        if (chessBoard && canvas) {
+            let isMouseDown = false;
+            let startSquare = null;
+
+            // Mouse down - start drag
+            chessBoard.addEventListener('mousedown', function(event) {
+                const rect = canvas.getBoundingClientRect();
+                const x = event.clientX - rect.left;
+                const y = event.clientY - rect.top;
+
+                // Convert to canvas coordinates
+                const canvasX = (x / rect.width) * canvas.width;
+                const canvasY = (y / rect.height) * canvas.height;
+
+                // Calculate square size
+                const squareSize = canvas.width / 8;
+
+                // Determine file (a=0, b=1, ..., h=7)
+                const file = Math.floor(canvasX / squareSize);
+                // Determine rank (1=0 at bottom, 8=7 at top)
+                const rank = 7 - Math.floor(canvasY / squareSize);
+
+                // Convert to algebraic notation
+                const fileLetter = String.fromCharCode(97 + file); // 97 = 'a'
+                const rankNumber = rank + 1;
+                const square = fileLetter + rankNumber;
+
+                console.log('mousedown ' + square);
+
+                // Check if there's a white piece on this square
+                const piece = window.chessAnim.position ? window.chessAnim.position[square] : null;
+                if (piece && piece === piece.toUpperCase() && piece !== piece.toLowerCase()) {
+                    isMouseDown = true;
+                    startSquare = square;
+
+                    // Pick up the piece - center it on mouse cursor
+                    window.chessAnim.draggedPiece = {
+                        square: square,
+                        piece: piece,
+                        size: squareSize,
+                        x: canvasX,  // Set initial position immediately
+                        y: canvasY
+                    };
+                    window.chessAnim.isDragging = true;
+                    
+                    // Force an immediate redraw to prevent "flash"
+                    if (window.chessAnim.draw) {
+                        window.chessAnim.draw();
+                    }
+
+                    // Highlight the piece
+                    window.chessAnim.selectedSquare = square;
+                    window.chessAnim.setHighlightedSquares([square]);
+                    emitEvent('piece_clicked', { square: square });
+                }
+            });
+
+            // Mouse move - drag piece
+            chessBoard.addEventListener('mousemove', function(event) {
+                if (window.chessAnim.isDragging && window.chessAnim.draggedPiece) {
+                    const rect = canvas.getBoundingClientRect();
+                    const x = event.clientX - rect.left;
+                    const y = event.clientY - rect.top;
+
+                    // Convert to canvas coordinates
+                    const canvasX = (x / rect.width) * canvas.width;
+                    const canvasY = (y / rect.height) * canvas.height;
+
+                    // Update dragged piece position
+                    window.chessAnim.draggedPiece.x = canvasX;
+                    window.chessAnim.draggedPiece.y = canvasY;
+
+                    // Redraw
+                    if (window.chessAnim.draw) {
+                        window.chessAnim.draw();
+                    }
+                }
+            });
+
+            // Mouse up - drop piece (snap back for now)
+            document.addEventListener('mouseup', function(event) {
+                if (window.chessAnim.isDragging) {
+                    window.chessAnim.isDragging = false;
+                    window.chessAnim.draggedPiece = null;
+
+                    // Redraw to snap piece back
+                    if (window.chessAnim.draw) {
+                        window.chessAnim.draw();
+                    }
+
+                    isMouseDown = false;
+                }
+            });
+        }
+        """
+
+        js_code_with_emit = """
+        function emitEvent(name, detail) {
+            const element = document.getElementById('chess_board_root');
+            if (element) {
+                element.dispatchEvent(new CustomEvent(name, { detail: detail, bubbles: true }));
+            }
+        }
+        """ + js_code
+
+        ui.run_javascript(js_code_with_emit)
+        
+    def handle_piece_click(self, e):
+        """Handle click events from the board."""
+        args = e.args
+        square = args.get('detail', {}).get('square')
+        
+        self.selected_square = square
+        if square:
+             # Trigger legal move update (this needs the board state from main app)
+             if self.on_piece_selected:
+                 self.on_piece_selected(square)
+        else:
+             # Clear legal moves
+             ui.run_javascript('if(window.chessAnim && window.chessAnim.setLegalMoveCircles) window.chessAnim.setLegalMoveCircles([]);')
+
+    def set_on_piece_selected(self, callback):
+        """Set the callback for when a piece is selected."""
+        self.on_piece_selected = callback
+
     def update_game_title(self, current_game=None):
         """Update the game title display.
 
@@ -128,6 +267,54 @@ class ChessBoard:
             f'if (window.chessAnim && window.chessAnim.setPosition) '
             f'{{ window.chessAnim.setPosition({position_json}); }}'
         )
+
+        # Update legal moves if a piece is selected
+        if hasattr(self, 'selected_square') and self.selected_square:
+            self.update_legal_moves(position_dict)
+
+    def update_legal_moves(self, position_dict):
+        """Update legal move circles for the currently selected piece.
+
+        Args:
+            position_dict: Current board position dictionary
+        """
+        if not self.selected_square or self.selected_square not in position_dict:
+            # Clear legal move circles if no piece selected or piece not on square
+            ui.run_javascript('if(window.chessAnim && window.chessAnim.setLegalMoveCircles) window.chessAnim.setLegalMoveCircles([]);')
+            return
+
+        # For now, we'll need to get legal moves from the game model
+        # This will be called from the main UI with the actual board
+        pass
+
+    def update_legal_moves_from_board(self, board):
+        """Calculate and display legal moves for the selected piece.
+
+        Args:
+            board: chess.Board object with current position
+        """
+        if not self.selected_square:
+            ui.run_javascript('if(window.chessAnim && window.chessAnim.setLegalMoveCircles) window.chessAnim.setLegalMoveCircles([]);')
+            return
+
+        try:
+            # Convert algebraic square to chess square index
+            from_square = chess.parse_square(self.selected_square)
+
+            # Get all legal moves from this square
+            legal_squares = []
+            for move in board.legal_moves:
+                if move.from_square == from_square:
+                    to_square_algebraic = chess.square_name(move.to_square)
+                    legal_squares.append(to_square_algebraic)
+
+            # Send legal move squares to JavaScript
+            legal_squares_json = json.dumps(legal_squares)
+            ui.run_javascript(f'if(window.chessAnim && window.chessAnim.setLegalMoveCircles) window.chessAnim.setLegalMoveCircles({legal_squares_json});')
+
+        except Exception as e:
+            print(f"Error calculating legal moves: {e}")
+            ui.run_javascript('if(window.chessAnim && window.chessAnim.setLegalMoveCircles) window.chessAnim.setLegalMoveCircles([]);')
 
     def animate_transition(self, start_pos, end_pos, result):
         """Send animation command with full state context.

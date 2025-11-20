@@ -63,6 +63,9 @@ class ChessAnalyzerUI:
             on_load_sample=self.controller.load_sample_game
         )
         self.chess_board = ChessBoard()
+        # Set up the callback for piece selection
+        self.chess_board.set_on_piece_selected(self.handle_piece_selected)
+        
         self.eval_bar = EvalBar()
         self.eval_chart = EvalChart()
         self.moves_list = MovesList(on_jump_to_ply=self.controller.jump_to_ply)
@@ -73,6 +76,12 @@ class ChessAnalyzerUI:
             on_last=self.controller.go_to_last_move
         )
 
+    def handle_piece_selected(self, square):
+        """Handle piece selection on the board."""
+        if self.model.board:
+            # Update legal moves using the current board state
+            self.chess_board.update_legal_moves_from_board(self.model.board)
+
     def display_moves(self):
         """Display the moves in the right panel."""
         move_rows = self.model.get_move_rows() if self.model.current_game else None
@@ -82,6 +91,8 @@ class ChessAnalyzerUI:
     def animate_transition(self, start_pos, end_pos, result):
         """Send animation command with full state context."""
         self.chess_board.animate_transition(start_pos, end_pos, result)
+        # Update legal moves after animation completes
+        self.chess_board.update_legal_moves_from_board(self.model.board)
 
     def trigger_upload(self):
         """Trigger the file upload dialog."""
@@ -129,6 +140,8 @@ class ChessAnalyzerUI:
 
         pos_dict = self.model.get_position_dict()
         self.chess_board.send_position_to_js(pos_dict)
+        # Update legal moves for any selected piece
+        self.chess_board.update_legal_moves_from_board(self.model.board)
 
     # ---------- Plotly evaluation chart ----------
 
