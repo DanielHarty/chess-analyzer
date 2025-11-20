@@ -10,6 +10,7 @@ import chess
 from pathlib import Path
 from game_model import GameModel
 from global_engine import GlobalStockfishEngine, shutdown_global_engine
+from pgn_utils import extract_pgn_content
 from components.eval_bar import EvalBar
 from components.eval_chart import EvalChart
 from components.chess_board import ChessBoard
@@ -72,48 +73,27 @@ class ChessAnalyzer:
         )
 
 
-    async def process_pgn_file(self, file_obj):
-        """Extract and decode content from an uploaded file object."""
-        filename = getattr(file_obj, 'name', 'unknown_file')
+    def _load_game_and_refresh_ui(self, content):
+        """Load PGN content into model and refresh all UI components."""
+        self.model.load_pgn_text(content)
 
-        # Try official NiceGUI APIs first
-        if hasattr(file_obj, 'read'):
-            # File-like object with read method (async in NiceGUI)
-            content = (await file_obj.read()).decode('utf-8')
-            return filename, content
-        elif hasattr(file_obj, 'content'):
-            # Direct content attribute (bytes)
-            if isinstance(file_obj.content, bytes):
-                content = file_obj.content.decode('utf-8')
-            else:
-                content = str(file_obj.content)
-            return filename, content
-        elif hasattr(file_obj, '_data'):
-            # Fallback to private attribute (current implementation)
-            content = file_obj._data.decode('utf-8')
-            return filename, content
-        else:
-            raise ValueError("Unable to extract content from uploaded file")
+        # Update game title
+        self.update_game_title()
+
+        # Update the UI with moves and board
+        self.display_moves()
+        self.send_full_position_to_js()
+        self.recompute_eval()
+        self.update_eval_chart()
+
+        # Start background evaluation
+        self.start_evaluation_with_progress()
 
     async def handle_upload(self, event):
         """Handle PGN file upload and parsing."""
         try:
-            filename, content = await self.process_pgn_file(event.file)
-
-            self.model.load_pgn_text(content)
-
-
-            # Update game title
-            self.update_game_title()
-
-            # Update the UI with moves and board
-            self.display_moves()
-            self.send_full_position_to_js()
-            self.recompute_eval()
-            self.update_eval_chart()
-
-            # Start background evaluation
-            self.start_evaluation_with_progress()
+            filename, content = await extract_pgn_content(event.file)
+            self._load_game_and_refresh_ui(content)
 
         except Exception as e:
             print(f"✗ Upload error: {e}")
@@ -201,20 +181,7 @@ class ChessAnalyzer:
             with open(ROOT / 'kasparov_topalov_1999.pgn', 'r', encoding='utf-8') as f:
                 content = f.read()
 
-            self.model.load_pgn_text(content)
-
-
-            # Update game title
-            self.update_game_title()
-
-            # Update the UI with moves and board
-            self.display_moves()
-            self.send_full_position_to_js()
-            self.recompute_eval()
-            self.update_eval_chart()
-
-            # Start background evaluation
-            self.start_evaluation_with_progress()
+            self._load_game_and_refresh_ui(content)
 
         except Exception as e:
             print(f"✗ Sample game load error: {e}")
@@ -279,13 +246,6 @@ class ChessAnalyzer:
         def progress_callback(current: int, total: int):
             """Update progress indicator."""
             self.header_bar.update_progress(current, total)
-            
-            # if current == 1:
-                # print("DEBUG: First evaluation complete")
-                # ui.notify("First evaluation complete")
-            
-            # Debug logging
-            # print(f"Eval {current}/{total}: {self.model.evaluations[current-1]}")
             
             # Update eval bar for current position if we're viewing it
             if current - 1 == self.model.current_ply:
