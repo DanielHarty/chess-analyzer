@@ -244,6 +244,42 @@ class GameModel:
 
         return rows
 
+    def get_blunders(self, threshold: int = 200) -> list[int]:
+        """Return list of ply indices where white blunders occurred.
+
+        A blunder is defined as a white move that causes a significant drop in evaluation.
+        Default threshold is 200 centipawns (2 pawns).
+
+        Args:
+            threshold: Minimum evaluation drop in centipawns to be considered a blunder.
+
+        Returns:
+            List of ply indices (after the blunder move) where white blunders occurred.
+        """
+        blunders = []
+
+        # Need at least 2 evaluations to compare
+        if len(self.evaluations) < 2:
+            return blunders
+
+        for i in range(1, len(self.evaluations)):
+            prev_eval = self.evaluations[i - 1]
+            curr_eval = self.evaluations[i]
+
+            # Skip if either evaluation is None
+            if prev_eval is None or curr_eval is None:
+                continue
+
+            eval_diff = curr_eval - prev_eval
+
+            # Only check blunders for white moves
+            # White moves from even ply (0, 2, 4...) to odd ply (1, 3, 5...)
+            if (i - 1) % 2 == 0:  # White moved
+                if eval_diff <= -threshold:
+                    blunders.append(i)
+
+        return blunders
+
     def get_current_evaluation(self) -> int | None:
         """Return the precalculated evaluation for the current position."""
         if self.current_ply < len(self.evaluations):

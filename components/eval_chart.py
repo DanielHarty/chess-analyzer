@@ -28,13 +28,14 @@ class EvalChart:
 
         return container
 
-    def create_eval_chart_figure(self, current_game=None, evaluations=None, current_ply=0):
+    def create_eval_chart_figure(self, current_game=None, evaluations=None, current_ply=0, blunders=None):
         """Create a plotly figure for the evaluation chart.
 
         Args:
             current_game: The current chess game (used to check if game exists)
             evaluations: List of evaluation scores
             current_ply: Current position in the game
+            blunders: List of ply indices where blunders occurred
 
         Returns:
             Plotly figure object
@@ -94,6 +95,26 @@ class EvalChart:
                     hovertemplate='Current<br>Move %{x}<br>Eval: %{y:.2f}<extra></extra>'
                 ))
 
+            # Add markers for blunders
+            if blunders:
+                blunder_x = []
+                blunder_y = []
+                for blunder_ply in blunders:
+                    if blunder_ply < len(evals) and evals[blunder_ply] is not None:
+                        blunder_eval = max(-30, min(30, evals[blunder_ply] / 100))
+                        blunder_x.append(blunder_ply)
+                        blunder_y.append(blunder_eval)
+
+                if blunder_x:
+                    fig.add_trace(go.Scatter(
+                        x=blunder_x,
+                        y=blunder_y,
+                        mode='markers',
+                        name='Blunders',
+                        marker=dict(size=12, color='#EF4444', symbol='x'),
+                        hovertemplate='Blunder<br>Move %{x}<br>Eval: %{y:.2f}<extra></extra>'
+                    ))
+
         # Add zero line
         fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
 
@@ -121,16 +142,17 @@ class EvalChart:
 
         return fig
 
-    def update_eval_chart(self, current_game=None, evaluations=None, current_ply=0):
+    def update_eval_chart(self, current_game=None, evaluations=None, current_ply=0, blunders=None):
         """Update the plotly evaluation chart.
 
         Args:
             current_game: The current chess game (used to check if game exists)
             evaluations: List of evaluation scores
             current_ply: Current position in the game
+            blunders: List of ply indices where blunders occurred
         """
         if self.eval_chart is None:
             return
 
-        fig = self.create_eval_chart_figure(current_game, evaluations, current_ply)
+        fig = self.create_eval_chart_figure(current_game, evaluations, current_ply, blunders)
         self.eval_chart.update_figure(fig)

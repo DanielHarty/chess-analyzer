@@ -134,10 +134,12 @@ class ChessAnalyzerUI:
 
     def update_eval_chart(self):
         """Update the plotly evaluation chart."""
+        blunders = self.model.get_blunders()
         self.eval_chart.update_eval_chart(
             current_game=self.model.current_game,
             evaluations=self.model.evaluations,
-            current_ply=self.model.current_ply
+            current_ply=self.model.current_ply,
+            blunders=blunders
         )
 
     # ---------- Stockfish evaluation + bar update ----------
