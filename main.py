@@ -10,8 +10,11 @@ import chess
 from pathlib import Path
 from game_model import GameModel
 from global_engine import GlobalStockfishEngine, shutdown_global_engine
+from components.eval_bar import EvalBar
+from components.eval_chart import EvalChart
+from components.chess_board import ChessBoard
+from components.moves_list import MovesList
 import platform
-import plotly.graph_objects as go
 
 ROOT = Path(__file__).resolve().parent
 if platform.system() == 'Windows':
@@ -20,21 +23,6 @@ else:
     # Linux/macOS
     ENGINE_PATH = ROOT / 'engines' / 'stockfish' / 'linux' / 'stockfish-ubuntu-x86-64-avx2'
 
-# Canvas-based board: JS helper with setPosition({ square: "P", ... })
-BOARD_HTML = """
-<div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center;">
-  <div id="chess_board_root"
-       style="
-         position:relative;
-         width: min(70vh, 70vw);
-         height: min(70vh, 70vw);
-       ">
-    <canvas id="chess_board_canvas" style="width:100%; height:100%;"></canvas>
-  </div>
-</div>
-"""
-
-BOARD_JS_INIT = (Path(__file__).parent / 'chess_board.js').read_text(encoding='utf-8')
 BOARD_CSS_INIT = (Path(__file__).parent / 'chess_board.css').read_text(encoding='utf-8')
 
 class ChessAnalyzer:
@@ -54,25 +42,18 @@ class ChessAnalyzer:
     def __init__(self):
         """Initialize the chess analyzer."""
         self.model = GameModel()
-        self.moves_container = None
         self.controls_container = None
-        self.game_title_label = None  # Label to display game title above board
-        self.move_row_elements = {}  # Store references to move row elements for scrolling
         self.upload_element = None  # Upload component for PGN files
 
-        # Stockfish + eval bar UI references (using global engine)
-        self.eval_bar_fill = None
-        self.eval_label = None
-        
+        # UI Components
+        self.chess_board = ChessBoard()
+        self.eval_bar = EvalBar()
+        self.eval_chart = EvalChart()
+        self.moves_list = MovesList(on_jump_to_ply=self.jump_to_ply)
+
         # Loading indicator for evaluation progress
         self.eval_progress_label = None
-        
-        # Plotly evaluation chart
-        self.eval_chart = None
 
-    def make_jump_handler(self, ply):
-        """Create a click handler that jumps to the specified ply."""
-        return lambda e: self.jump_to_ply(ply)
 
     async def process_pgn_file(self, file_obj):
         """Extract and decode content from an uploaded file object."""
@@ -123,58 +104,8 @@ class ChessAnalyzer:
 
     def display_moves(self):
         """Display the moves in the right panel."""
-        if self.moves_container is None:
-            return
-
-        self.moves_container.clear()
-        self.move_row_elements.clear()
-
-        if self.model.current_game is None:
-            with self.moves_container:
-                ui.label('No game loaded').classes('text-gray-400 text-center py-8')
-            self.update_controls()
-            return
-
-        rows = self.model.get_move_rows()
-        current_ply = self.model.current_ply
-
-        with self.moves_container:
-            for row_index, (move_number, white_move, black_move) in enumerate(rows):
-                white_ply = row_index * 2
-                black_ply = white_ply + 1
-
-                move_row = ui.row().classes('w-full justify-between py-1')
-                self.move_row_elements[move_number] = move_row
-
-                with move_row:
-                    ui.label(f"{move_number}.").classes('text-gray-300 w-8')
-
-                    # white
-                    is_active_white = (white_ply + 1 == current_ply)
-                    white_classes = 'text-white flex-1 text-center cursor-pointer px-2 py-1 rounded'
-                    white_classes += ' bg-blue-700' if is_active_white else ' hover:bg-gray-700'
-                    ui.label(white_move).classes(white_classes).on(
-                        'click', self.make_jump_handler(white_ply + 1)
-                    )
-
-                    # black
-                    is_active_black = (black_ply + 1 == current_ply)
-                    black_classes = 'text-white flex-1 text-center cursor-pointer px-2 py-1 rounded'
-                    black_classes += ' bg-blue-700' if is_active_black else ' hover:bg-gray-700'
-                    black_label = ui.label(black_move).classes(black_classes)
-                    if black_move:
-                        black_label.on('click', self.make_jump_handler(black_ply + 1))
-
-        # Auto-scroll to current move if we're not at the starting position
-        if self.model.current_ply > 0:
-            # Calculate which row contains the current move
-            # Each row has 2 moves (white and black), so row number = ((ply - 1) // 2) + 1
-            current_row_number = ((self.model.current_ply - 1) // 2) + 1
-            if current_row_number in self.move_row_elements:
-                # Use run_method to scroll the row into view
-                self.move_row_elements[current_row_number].run_method('scrollIntoView', {'behavior': 'smooth', 'block': 'start'})
-
-        # Update controls visibility
+        move_rows = self.model.get_move_rows() if self.model.current_game else None
+        self.moves_list.display_moves(move_rows, self.model.current_ply)
         self.update_controls()
 
     def update_controls(self):
@@ -209,78 +140,7 @@ class ChessAnalyzer:
 
     def animate_transition(self, start_pos, end_pos, result):
         """Send animation command with full state context."""
-        move_type = 'simple'
-        details = {}
-
-        if result.get("is_castling"):
-            move_type = 'castling'
-            # Determine castling details from the move
-            king_from = result["from"]
-            king_to = result["to"]
-            piece = result["piece"]
-            is_white = piece.symbol().isupper()
-            
-            if is_white:
-                king_symbol = 'K'
-                rook_symbol = 'R'
-                if king_to == 'g1': # Kingside
-                    rook_from, rook_to = 'h1', 'f1'
-                else: # Queenside
-                    rook_from, rook_to = 'a1', 'd1'
-            else:
-                king_symbol = 'k'
-                rook_symbol = 'r'
-                if king_to == 'g8': # Kingside
-                    rook_from, rook_to = 'h8', 'f8'
-                else: # Queenside
-                    rook_from, rook_to = 'a8', 'd8'
-            
-            details = {
-                'kingFrom': king_from, 'kingTo': king_to,
-                'rookFrom': rook_from, 'rookTo': rook_to,
-                'kingSymbol': king_symbol, 'rookSymbol': rook_symbol
-            }
-
-        elif result.get("is_en_passant") and result["piece"]:
-            # En passant: pawn moves diagonally, captures adjacent pawn
-            move_type = 'en_passant'
-
-            # Calculate captured square: same rank as from, same file as to
-            from_square = result["from"]  # e.g., "f5"
-            to_square = result["to"]      # e.g., "e6"
-
-            # Convert to coordinates
-            from_file = ord(from_square[0]) - ord('a')
-            from_rank = int(from_square[1]) - 1
-            to_file = ord(to_square[0]) - ord('a')
-
-            # Captured pawn is at (to_file, from_rank)
-            captured_file = chr(ord('a') + to_file)
-            captured_rank = str(from_rank + 1)
-            captured_square = captured_file + captured_rank
-
-            details = {
-                'pawnFrom': from_square,
-                'pawnTo': to_square,
-                'pawnSymbol': result["piece"].symbol(),
-                'capturedSquare': captured_square
-            }
-        elif result["piece"]:
-            # Simple move (including promotions)
-            details = {
-                'from': result["from"],
-                'to': result["to"],
-                'symbol': result["piece"].symbol()
-            }
-
-        js_args = json.dumps({
-            'startPos': start_pos,
-            'endPos': end_pos,
-            'type': move_type,
-            'details': details
-        })
-        
-        ui.run_javascript(f'if(window.chessAnim && window.chessAnim.animateMoveWithState) window.chessAnim.animateMoveWithState({js_args});')
+        self.chess_board.animate_transition(start_pos, end_pos, result)
 
     def go_to_previous_move(self):
         """Go to the previous move."""
@@ -339,15 +199,7 @@ class ChessAnalyzer:
 
     def update_game_title(self):
         """Update the game title display above the chess board."""
-        if self.game_title_label is None:
-            return
-
-        if self.model.current_game:
-            white = self.model.current_game.headers.get('White', 'Unknown')
-            black = self.model.current_game.headers.get('Black', 'Unknown')
-            self.game_title_label.text = f"{white} vs {black}"
-        else:
-            self.game_title_label.text = "No game loaded"
+        self.chess_board.update_game_title(self.model.current_game)
 
     def load_sample_game(self):
         """Load the sample Kasparov vs Topalov game."""
@@ -374,29 +226,6 @@ class ChessAnalyzer:
             print(f"✗ Sample game load error: {e}")
             ui.notify(f"Failed to load sample game: {e}", type="negative")
 
-    def setup_keyboard_navigation(self):
-        """Set up keyboard event listeners for arrow key navigation."""
-        js_code = """
-        document.addEventListener('keydown', function(event) {
-            // Only handle arrow keys if no input/textarea is focused
-            if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
-                return;
-            }
-
-            if (event.key === 'ArrowLeft') {
-                event.preventDefault();
-                // Find and click the previous button
-                const prevBtn = document.querySelector('.chess-prev-btn');
-                if (prevBtn) prevBtn.click();
-            } else if (event.key === 'ArrowRight') {
-                event.preventDefault();
-                // Find and click the next button
-                const nextBtn = document.querySelector('.chess-next-btn');
-                if (nextBtn) nextBtn.click();
-            }
-        });
-        """
-        ui.run_javascript(js_code)
 
     def create_ui(self):
         """Create and setup the user interface."""
@@ -424,42 +253,21 @@ class ChessAnalyzer:
             # Main content area
             with ui.row().classes('gap-4 px-4 py-2 items-start flex-1 overflow-hidden'):
                 # Left side: Eval bar
-                with ui.column().classes('items-center justify-center w-16 flex-shrink-0'):
-                    ui.label('Eval').classes('text-xs text-gray-400 mb-1')
-
-                    with ui.element('div').classes('eval-bar-container'):
-                        self.eval_bar_fill = ui.element('div').classes('eval-bar-fill')
-
-                    self.eval_label = ui.label('0.00').classes('eval-bar-label text-center w-full')
+                self.eval_bar.create_ui()
 
                 # Center: Chess board
-                with ui.column().classes('items-center bg-gray-800 rounded-lg p-4'):
-                    # Game title above board
-                    self.game_title_label = ui.label('No game loaded').classes('text-lg font-bold text-center text-white mb-2')
-
-                    # simple container – no flex-1 / h-full
-                    with ui.element('div').classes('flex items-center justify-center'):
-                        self.board_html = ui.html(BOARD_HTML, sanitize=False).classes('block')
-
-                    ui.run_javascript(BOARD_JS_INIT)
-
-                    # Add keyboard navigation
-                    self.setup_keyboard_navigation()
+                self.chess_board.create_ui()
 
                 # Right side: Eval chart and moves panel
                 with ui.column().classes('w-96 bg-gray-800 rounded-lg overflow-hidden flex flex-col h-full'):
                     # Evaluation chart at top
-                    with ui.column().classes('w-full p-3 border-b border-gray-700 flex-shrink-0'):
-                        initial_fig = self.create_eval_chart_figure()
-                        self.eval_chart = ui.plotly(initial_fig).classes('w-full')
+                    self.eval_chart.create_ui()
                     
                     # Moves header
                     ui.label('Moves').classes('text-lg font-bold p-4 border-b border-gray-700 flex-shrink-0')
 
                     # Moves list
-                    self.moves_container = ui.column().classes('flex-1 w-full overflow-y-auto pl-4 pr-0 py-2 gap-2 modern-scrollbar min-h-0')
-                    with self.moves_container:
-                        ui.label('No game loaded').classes('text-gray-400 text-center py-8')
+                    self.moves_list.create_ui()
 
                     # Game controls at bottom
                     self.controls_container = ui.column().classes('w-full border-t border-gray-700 p-4 flex-shrink-0')
@@ -472,108 +280,17 @@ class ChessAnalyzer:
             return
 
         pos_dict = self.model.get_position_dict()
-        position_json = json.dumps(pos_dict)
-
-        # Guard against chessAnim not being defined yet
-        ui.run_javascript(
-            f'if (window.chessAnim && window.chessAnim.setPosition) '
-            f'{{ window.chessAnim.setPosition({position_json}); }}'
-        )
+        self.chess_board.send_position_to_js(pos_dict)
 
     # ---------- Plotly evaluation chart ----------
-    
-    def create_eval_chart_figure(self):
-        """Create a plotly figure for the evaluation chart."""
-        if not self.model.current_game:
-            # Empty chart when no game is loaded
-            fig = go.Figure()
-            fig.update_layout(
-                title="Evaluation",
-                xaxis_title="Move",
-                yaxis_title="Pawns",
-                template="plotly_dark",
-                height=220,
-                margin=dict(l=35, r=10, t=35, b=35),
-                plot_bgcolor='rgba(31, 41, 55, 1)',
-                paper_bgcolor='rgba(31, 41, 55, 1)',
-                font=dict(size=10),
-            )
-            return fig
-        
-        # Get evaluations and convert to pawns (divide by 100)
-        evals = self.model.evaluations
-        move_numbers = list(range(len(evals)))
-        
-        # Convert centipawns to pawns, handling None values
-        eval_pawns = []
-        valid_moves = []
-        for i, ev in enumerate(evals):
-            if ev is not None:
-                # Clamp extreme values for better visualization
-                clamped = max(-30, min(30, ev / 100))
-                eval_pawns.append(clamped)
-                valid_moves.append(i)
-        
-        # Create the line trace
-        fig = go.Figure()
-        
-        if eval_pawns:
-            fig.add_trace(go.Scatter(
-                x=valid_moves,
-                y=eval_pawns,
-                mode='lines',
-                name='Evaluation',
-                line=dict(color='#60A5FA', width=2),
-                hovertemplate='Move %{x}<br>Eval: %{y:.2f}<extra></extra>'
-            ))
-            
-            # Add a marker for the current position
-            current_ply = self.model.current_ply
-            if current_ply < len(evals) and evals[current_ply] is not None:
-                current_eval = max(-30, min(30, evals[current_ply] / 100))
-                fig.add_trace(go.Scatter(
-                    x=[current_ply],
-                    y=[current_eval],
-                    mode='markers',
-                    name='Current Position',
-                    marker=dict(size=10, color='#F59E0B', symbol='circle'),
-                    hovertemplate='Current<br>Move %{x}<br>Eval: %{y:.2f}<extra></extra>'
-                ))
-        
-        # Add zero line
-        fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
-        
-        fig.update_layout(
-            title="Evaluation",
-            xaxis_title="Move",
-            yaxis_title="Pawns",
-            template="plotly_dark",
-            height=220,
-            margin=dict(l=35, r=10, t=35, b=35),
-            plot_bgcolor='rgba(31, 41, 55, 1)',
-            paper_bgcolor='rgba(31, 41, 55, 1)',
-            hovermode='x unified',
-            showlegend=False,
-            font=dict(size=10),
-            xaxis=dict(
-                gridcolor='rgba(75, 85, 99, 0.3)',
-                dtick=5 if len(evals) > 30 else 2,
-            ),
-            yaxis=dict(
-                gridcolor='rgba(75, 85, 99, 0.3)',
-                range=[-10, 10] if max(abs(min(eval_pawns, default=0)), abs(max(eval_pawns, default=0))) <= 10 else None
-            ),
-        )
-        
-        return fig
-    
+
     def update_eval_chart(self):
         """Update the plotly evaluation chart."""
-        if self.eval_chart is None:
-            return
-        
-        fig = self.create_eval_chart_figure()
-        self.eval_chart.update_figure(fig)
+        self.eval_chart.update_eval_chart(
+            current_game=self.model.current_game,
+            evaluations=self.model.evaluations,
+            current_ply=self.model.current_ply
+        )
 
     # ---------- Stockfish evaluation + bar update ----------
 
@@ -608,51 +325,11 @@ class ChessAnalyzer:
     def recompute_eval(self):
         """Update the eval bar using precalculated evaluations."""
         if self.model.board is None:
-            self.update_eval_bar(None)
+            self.eval_bar.update_eval_bar(None)
             return
 
         cp = self.model.get_current_evaluation()
-        self.update_eval_bar(cp)
-
-    def update_eval_bar(self, cp: int | None):
-        """Update the eval bar and numeric label from a centipawn score."""
-        if self.eval_bar_fill is None or self.eval_label is None:
-            return
-
-        if cp is None:
-            # Unknown / engine failed
-            self.eval_bar_fill.style(
-                'height: 50%; bottom: 0; top: auto; background-color: #9CA3AF;'
-            )
-            self.eval_label.text = '--'
-            return
-
-        # Clamp crazy evals so the bar doesn't just slam to the top all the time
-        clamp = 800  # 8 pawns, roughly
-        cp_clamped = max(-clamp, min(clamp, cp))
-
-        # New mapping: 50% at equal, 100% at ±clamp
-        m = min(1.0, abs(cp_clamped) / clamp)      # 0..1
-        percent = 50 + m * 50                      # 50..100
-
-        # Always fill from bottom up in white
-        # White advantage: larger white bar from bottom
-        # Black advantage: smaller white bar from bottom
-        if cp_clamped >= 0:
-            height_percent = percent
-        else:
-            height_percent = 100 - percent
-
-        style = (
-            f'height: {height_percent}%; '
-            f'bottom: 0; top: auto; '
-            f'background-color: #F9FAFB;'
-        )
-
-        self.eval_bar_fill.style(style)
-
-        # Show eval as something like "+0.34" (white perspective)
-        self.eval_label.text = f'{cp / 100:.2f}'
+        self.eval_bar.update_eval_bar(cp)
 
 
 @ui.page('/')
