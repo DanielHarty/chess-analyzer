@@ -10,7 +10,7 @@ import chess
 from pathlib import Path
 from game_model import GameModel
 from global_engine import GlobalStockfishEngine, shutdown_global_engine
-from pgn_utils import extract_pgn_content
+from game_controller import GameController
 from components.eval_bar import EvalBar
 from components.eval_chart import EvalChart
 from components.chess_board import ChessBoard
@@ -40,7 +40,7 @@ if platform.system() == 'Windows':
 
 BOARD_CSS_INIT = (Path(__file__).parent / 'chess_board.css').read_text(encoding='utf-8')
 
-class ChessAnalyzer:
+class ChessAnalyzerUI:
     """Main GUI application class for chess game analysis.
 
     This class handles all user interface concerns including:
@@ -48,56 +48,30 @@ class ChessAnalyzer:
     - JavaScript communication with the chess board
     - User interaction handling (clicks, uploads, navigation)
 
-    Game logic is delegated to the GameModel class for better separation of concerns
-    and testability.
+    Game logic is delegated to the GameModel class.
+    Flow control is delegated to the GameController class.
     """
 
     def __init__(self):
         """Initialize the chess analyzer."""
         self.model = GameModel()
+        self.controller = GameController(self.model, self)
 
         # UI Components
         self.header_bar = HeaderBar(
-            on_upload=self.handle_upload,
-            on_load_sample=self.load_sample_game
+            on_upload=self.controller.handle_upload,
+            on_load_sample=self.controller.load_sample_game
         )
         self.chess_board = ChessBoard()
         self.eval_bar = EvalBar()
         self.eval_chart = EvalChart()
-        self.moves_list = MovesList(on_jump_to_ply=self.jump_to_ply)
+        self.moves_list = MovesList(on_jump_to_ply=self.controller.jump_to_ply)
         self.game_controls = GameControls(
-            on_first=self.go_to_first_move,
-            on_previous=self.go_to_previous_move,
-            on_next=self.go_to_next_move,
-            on_last=self.go_to_last_move
+            on_first=self.controller.go_to_first_move,
+            on_previous=self.controller.go_to_previous_move,
+            on_next=self.controller.go_to_next_move,
+            on_last=self.controller.go_to_last_move
         )
-
-
-    def _load_game_and_refresh_ui(self, content):
-        """Load PGN content into model and refresh all UI components."""
-        self.model.load_pgn_text(content)
-
-        # Update game title
-        self.update_game_title()
-
-        # Update the UI with moves and board
-        self.display_moves()
-        self.send_full_position_to_js()
-        self.recompute_eval()
-        self.update_eval_chart()
-
-        # Start background evaluation
-        self.start_evaluation_with_progress()
-
-    async def handle_upload(self, event):
-        """Handle PGN file upload and parsing."""
-        try:
-            filename, content = await extract_pgn_content(event.file)
-            self._load_game_and_refresh_ui(content)
-
-        except Exception as e:
-            print(f"✗ Upload error: {e}")
-            ui.notify(f"Upload failed: {e}", type="negative")
 
     def display_moves(self):
         """Display the moves in the right panel."""
@@ -105,67 +79,9 @@ class ChessAnalyzer:
         self.moves_list.display_moves(move_rows, self.model.current_ply)
         self.game_controls.update_controls(self.model.current_game is not None)
 
-    def go_to_first_move(self):
-        """Go to the starting position (total board reset)."""
-        self.model.go_to_start()
-        self.send_full_position_to_js()
-        self.display_moves()
-        self.recompute_eval()
-        self.update_eval_chart()
-
     def animate_transition(self, start_pos, end_pos, result):
         """Send animation command with full state context."""
         self.chess_board.animate_transition(start_pos, end_pos, result)
-
-    def go_to_previous_move(self):
-        """Go to the previous move."""
-        if self.model.current_game is None:
-            return
-
-        start_pos = self.model.get_position_dict()
-        result = self.model.step_back()
-        if result is None:
-            return
-        end_pos = self.model.get_position_dict()
-
-        self.animate_transition(start_pos, end_pos, result)
-
-        self.display_moves()
-        self.recompute_eval()
-        self.update_eval_chart()
-
-    def go_to_next_move(self):
-        """Go to the next move."""
-        if self.model.current_game is None:
-            return
-
-        start_pos = self.model.get_position_dict()
-        result = self.model.step_forward()
-        if result is None:
-            return
-        end_pos = self.model.get_position_dict()
-
-        self.animate_transition(start_pos, end_pos, result)
-
-        self.display_moves()
-        self.recompute_eval()
-        self.update_eval_chart()
-
-    def go_to_last_move(self):
-        """Go to the last move."""
-        self.model.go_to_end()
-        self.send_full_position_to_js()
-        self.display_moves()
-        self.recompute_eval()
-        self.update_eval_chart()
-
-    def jump_to_ply(self, ply):
-        """Jump to a specific ply by clicking on a move."""
-        self.model.go_to_ply(ply)
-        self.send_full_position_to_js()
-        self.display_moves()
-        self.recompute_eval()
-        self.update_eval_chart()
 
     def trigger_upload(self):
         """Trigger the file upload dialog."""
@@ -174,19 +90,6 @@ class ChessAnalyzer:
     def update_game_title(self):
         """Update the game title display above the chess board."""
         self.chess_board.update_game_title(self.model.current_game)
-
-    def load_sample_game(self):
-        """Load the sample Kasparov vs Topalov game."""
-        try:
-            with open(ROOT / 'kasparov_topalov_1999.pgn', 'r', encoding='utf-8') as f:
-                content = f.read()
-
-            self._load_game_and_refresh_ui(content)
-
-        except Exception as e:
-            print(f"✗ Sample game load error: {e}")
-            ui.notify(f"Failed to load sample game: {e}", type="negative")
-
 
     def create_ui(self):
         """Create and setup the user interface."""
@@ -239,30 +142,6 @@ class ChessAnalyzer:
 
     # ---------- Stockfish evaluation + bar update ----------
 
-    def start_evaluation_with_progress(self):
-        """Start background evaluation and show progress."""
-        self.header_bar.show_progress()
-        
-        def progress_callback(current: int, total: int):
-            """Update progress indicator."""
-            self.header_bar.update_progress(current, total)
-            
-            # Update eval bar for current position if we're viewing it
-            if current - 1 == self.model.current_ply:
-                self.recompute_eval()
-            
-            # Update the plotly chart every few evaluations for performance
-            if current % 5 == 0 or current == total:
-                self.update_eval_chart()
-            
-            # Hide progress when complete
-            if current == total:
-                self.header_bar.hide_progress()
-                self.recompute_eval()  # Final update
-                self.update_eval_chart()  # Final chart update
-        
-        self.model.start_background_evaluation(progress_callback)
-
     def recompute_eval(self):
         """Update the eval bar using precalculated evaluations."""
         if self.model.board is None:
@@ -279,7 +158,7 @@ def home():
     # Initialize the global Stockfish engine
     GlobalStockfishEngine(str(ENGINE_PATH))
 
-    analyzer = ChessAnalyzer()
+    analyzer = ChessAnalyzerUI()
     analyzer.create_ui()
     # app.on_shutdown(shutdown_global_engine)
 
