@@ -43,7 +43,8 @@ class GlobalStockfishEngine:
         if not hasattr(self, '_initialized'):
             self._initialized = True
             self.transport: asyncio.SubprocessTransport | None = None
-            self.engine: chess.engine.UciProtocol | None = None
+            # Can be either SimpleEngine or UciProtocol
+            self.engine: chess.engine.SimpleEngine | chess.engine.UciProtocol | None = None
             self.time_limit = time_limit
             # Defer engine start to first usage (async)
 
@@ -54,20 +55,36 @@ class GlobalStockfishEngine:
 
     async def _ensure_engine(self) -> None:
         """Ensure the engine is started and available."""
-        if self.transport is not None and not self.transport.is_closing():
-            return
+        if self.engine is not None:
+            # For SimpleEngine, check if it's still alive by trying to ping
+            if isinstance(self.engine, chess.engine.SimpleEngine):
+                try:
+                    self.engine.ping()
+                    return
+                except:
+                    # Engine is dead, need to restart
+                    self.engine = None
+            elif self.transport is not None and not self.transport.is_closing():
+                return
 
         try:
             if not os.path.exists(self._engine_path):
                 print(f"Engine file not found at {self._engine_path}")
                 return
 
-            # Use async popen_uci directly
-            transport, engine = await chess.engine.popen_uci(self._engine_path)
-            self.transport = transport
-            self.engine = engine
+            # Use SimpleEngine.popen_uci which is synchronous and works on Windows
+            # regardless of event loop type. Run it in an executor to avoid blocking.
+            # This is the recommended approach for Windows compatibility.
+            loop = asyncio.get_event_loop()
+            self.engine = await loop.run_in_executor(
+                None,
+                lambda: chess.engine.SimpleEngine.popen_uci(str(self._engine_path))
+            )
+            self.transport = None  # SimpleEngine manages its own transport internally
         except Exception as e:
             print(f"[GlobalStockfishEngine] Failed to start engine: {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
             self.engine = None
             self.transport = None
 
@@ -82,8 +99,18 @@ class GlobalStockfishEngine:
             if self.engine is None:
                 return None
 
-            # Use async analyse
-            info = await self.engine.analyse(board, chess.engine.Limit(time=self.time_limit))
+            # Handle both SimpleEngine (synchronous) and UciProtocol (async)
+            if isinstance(self.engine, chess.engine.SimpleEngine):
+                # SimpleEngine uses synchronous analyse
+                loop = asyncio.get_event_loop()
+                info = await loop.run_in_executor(
+                    None,
+                    lambda: self.engine.analyse(board, chess.engine.Limit(time=self.time_limit))
+                )
+            else:
+                # Use async analyse for UciProtocol
+                info = await self.engine.analyse(board, chess.engine.Limit(time=self.time_limit))
+            
             score = info["score"].white()
 
             if score.is_mate():
@@ -104,10 +131,21 @@ class GlobalStockfishEngine:
         """Close the engine if it exists."""
         if self.engine is not None:
             try:
-                await self.engine.quit()
+                # Handle both SimpleEngine (synchronous) and UciProtocol (async)
+                if isinstance(self.engine, chess.engine.SimpleEngine):
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(None, self.engine.quit)
+                else:
+                    await self.engine.quit()
             except Exception:
                 pass
             self.engine = None
+        if self.transport is not None:
+            try:
+                if not self.transport.is_closing():
+                    self.transport.close()
+            except Exception:
+                pass
             self.transport = None
 
     @classmethod

@@ -14,6 +14,8 @@ from components.eval_bar import EvalBar
 from components.eval_chart import EvalChart
 from components.chess_board import ChessBoard
 from components.moves_list import MovesList
+from components.header_bar import HeaderBar
+from components.game_controls import GameControls
 import platform
 import asyncio
 
@@ -24,10 +26,16 @@ else:
     # Linux/macOS
     ENGINE_PATH = ROOT / 'engines' / 'stockfish' / 'linux' / 'stockfish-ubuntu-x86-64-avx2'
 
-# Force ProactorEventLoop on Windows for subprocess support
+# Use ProactorEventLoop on Windows - required for subprocess support
+# SimpleEngine.popen_uci() works with ProactorEventLoop when run in executor
 if platform.system() == 'Windows':
-    policy = asyncio.WindowsProactorEventLoopPolicy()
-    asyncio.set_event_loop_policy(policy)
+    try:
+        policy = asyncio.WindowsProactorEventLoopPolicy()
+        asyncio.set_event_loop_policy(policy)
+    except AttributeError:
+        # WindowsProactorEventLoopPolicy not available on older Python versions
+        # Fall back to default policy
+        pass
 
 BOARD_CSS_INIT = (Path(__file__).parent / 'chess_board.css').read_text(encoding='utf-8')
 
@@ -46,17 +54,22 @@ class ChessAnalyzer:
     def __init__(self):
         """Initialize the chess analyzer."""
         self.model = GameModel()
-        self.controls_container = None
-        self.upload_element = None  # Upload component for PGN files
 
         # UI Components
+        self.header_bar = HeaderBar(
+            on_upload=self.handle_upload,
+            on_load_sample=self.load_sample_game
+        )
         self.chess_board = ChessBoard()
         self.eval_bar = EvalBar()
         self.eval_chart = EvalChart()
         self.moves_list = MovesList(on_jump_to_ply=self.jump_to_ply)
-
-        # Loading indicator for evaluation progress
-        self.eval_progress_label = None
+        self.game_controls = GameControls(
+            on_first=self.go_to_first_move,
+            on_previous=self.go_to_previous_move,
+            on_next=self.go_to_next_move,
+            on_last=self.go_to_last_move
+        )
 
 
     async def process_pgn_file(self, file_obj):
@@ -110,29 +123,7 @@ class ChessAnalyzer:
         """Display the moves in the right panel."""
         move_rows = self.model.get_move_rows() if self.model.current_game else None
         self.moves_list.display_moves(move_rows, self.model.current_ply)
-        self.update_controls()
-
-    def update_controls(self):
-        """Update the controls visibility based on game state."""
-        if self.controls_container is None:
-            return
-
-        # Clear existing controls
-        self.controls_container.clear()
-
-        if self.model.current_game:
-            # Show navigation buttons
-            with self.controls_container:
-                with ui.row().classes('w-full justify-center gap-4'):
-                    ui.button('◀◀', on_click=self.go_to_first_move).classes('px-4 py-2 chess-nav-btn chess-first-btn')
-                    ui.button('◀', on_click=self.go_to_previous_move).classes('px-4 py-2 chess-nav-btn chess-prev-btn')
-                    ui.button('▶', on_click=self.go_to_next_move).classes('px-4 py-2 chess-nav-btn chess-next-btn')
-                    ui.button('▶▶', on_click=self.go_to_last_move).classes('px-4 py-2 chess-nav-btn chess-last-btn')
-        else:
-            # Show upload message
-            with self.controls_container:
-                ui.label('Upload a PGN file to start analyzing').classes('text-gray-400 text-center')
-
+        self.game_controls.update_controls(self.model.current_game is not None)
 
     def go_to_first_move(self):
         """Go to the starting position (total board reset)."""
@@ -198,8 +189,7 @@ class ChessAnalyzer:
 
     def trigger_upload(self):
         """Trigger the file upload dialog."""
-        if self.upload_element:
-            self.upload_element.run_method('pickFiles')
+        self.header_bar.trigger_upload()
 
     def update_game_title(self):
         """Update the game title display above the chess board."""
@@ -238,21 +228,7 @@ class ChessAnalyzer:
 
         with ui.column().classes('fixed inset-0 w-screen h-screen bg-gray-900 text-white overflow-hidden'):
             # Header
-            with ui.row().classes('w-full px-4 py-3 border-b border-gray-700 items-center gap-4 flex-shrink-0'):
-                ui.label('Chess Analyzer v0.1').classes('text-2xl font-bold')
-
-                # Hidden upload component
-                self.upload_element = ui.upload(on_upload=self.handle_upload, label="", auto_upload=True).props('accept=.pgn').classes('hidden')
-
-                # Sample game button
-                ui.button('Load Sample', icon='play_arrow', on_click=self.load_sample_game).classes('')
-
-                # Visible upload button
-                ui.button('Upload PGN', icon='add', on_click=self.trigger_upload).classes('ml-auto')
-                
-                # Progress indicator
-                self.eval_progress_label = ui.label('Analyzing positions: 0%').classes('text-sm text-gray-400 ml-4')
-                self.eval_progress_label.visible = False
+            self.header_bar.create_ui()
 
             # Main content area
             with ui.row().classes('gap-4 px-4 py-2 items-start flex-1 overflow-hidden'):
@@ -274,9 +250,7 @@ class ChessAnalyzer:
                     self.moves_list.create_ui()
 
                     # Game controls at bottom
-                    self.controls_container = ui.column().classes('w-full border-t border-gray-700 p-4 flex-shrink-0')
-                    with self.controls_container:
-                        ui.label('Upload a PGN file to start analyzing').classes('text-gray-400 text-center')
+                    self.game_controls.create_ui()
 
     def send_full_position_to_js(self):
         """Send the current board position to the browser (no animation)."""
@@ -300,15 +274,11 @@ class ChessAnalyzer:
 
     def start_evaluation_with_progress(self):
         """Start background evaluation and show progress."""
-        if self.eval_progress_label:
-            self.eval_progress_label.visible = True
-            self.eval_progress_label.text = "Analyzing positions: 0%"
+        self.header_bar.show_progress()
         
         def progress_callback(current: int, total: int):
             """Update progress indicator."""
-            percent = int((current / total) * 100)
-            if self.eval_progress_label:
-                self.eval_progress_label.text = f"Analyzing positions: {percent}%"
+            self.header_bar.update_progress(current, total)
             
             # if current == 1:
                 # print("DEBUG: First evaluation complete")
@@ -326,8 +296,8 @@ class ChessAnalyzer:
                 self.update_eval_chart()
             
             # Hide progress when complete
-            if current == total and self.eval_progress_label:
-                self.eval_progress_label.visible = False
+            if current == total:
+                self.header_bar.hide_progress()
                 self.recompute_eval()  # Final update
                 self.update_eval_chart()  # Final chart update
         
@@ -354,6 +324,17 @@ def home():
     # app.on_shutdown(shutdown_global_engine)
 
 if __name__ in {"__main__", "__mp_main__"}:
-    app.on_shutdown(shutdown_global_engine)
+    async def shutdown_handler():
+        """Handle application shutdown gracefully."""
+        try:
+            await shutdown_global_engine()
+        except asyncio.CancelledError:
+            # Ignore cancellation errors during shutdown
+            pass
+        except Exception as e:
+            print(f"Error during shutdown: {e}")
+    
+    app.on_shutdown(shutdown_handler)
     port = int(os.environ.get('PORT', 8080))
-    ui.run(host="0.0.0.0", port=port, reload=False)
+    ui.run(host="0.0.0.0", port=port, reload=True)
+    print("Application shutdown complete!")
