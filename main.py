@@ -15,6 +15,7 @@ from components.eval_chart import EvalChart
 from components.chess_board import ChessBoard
 from components.moves_list import MovesList
 import platform
+import asyncio
 
 ROOT = Path(__file__).resolve().parent
 if platform.system() == 'Windows':
@@ -22,6 +23,11 @@ if platform.system() == 'Windows':
 else:
     # Linux/macOS
     ENGINE_PATH = ROOT / 'engines' / 'stockfish' / 'linux' / 'stockfish-ubuntu-x86-64-avx2'
+
+# Force ProactorEventLoop on Windows for subprocess support
+if platform.system() == 'Windows':
+    policy = asyncio.WindowsProactorEventLoopPolicy()
+    asyncio.set_event_loop_policy(policy)
 
 BOARD_CSS_INIT = (Path(__file__).parent / 'chess_board.css').read_text(encoding='utf-8')
 
@@ -36,8 +42,6 @@ class ChessAnalyzer:
     Game logic is delegated to the GameModel class for better separation of concerns
     and testability.
     """
-
-
 
     def __init__(self):
         """Initialize the chess analyzer."""
@@ -306,8 +310,8 @@ class ChessAnalyzer:
             if self.eval_progress_label:
                 self.eval_progress_label.text = f"Analyzing positions: {percent}%"
             
-            if current == 1:
-                print("DEBUG: First evaluation complete")
+            # if current == 1:
+                # print("DEBUG: First evaluation complete")
                 # ui.notify("First evaluation complete")
             
             # Debug logging
@@ -328,7 +332,6 @@ class ChessAnalyzer:
                 self.update_eval_chart()  # Final chart update
         
         self.model.start_background_evaluation(progress_callback)
-        ui.notify("Started background evaluation")
 
     def recompute_eval(self):
         """Update the eval bar using precalculated evaluations."""
@@ -348,8 +351,9 @@ def home():
 
     analyzer = ChessAnalyzer()
     analyzer.create_ui()
-    app.on_shutdown(shutdown_global_engine)
+    # app.on_shutdown(shutdown_global_engine)
 
 if __name__ in {"__main__", "__mp_main__"}:
+    app.on_shutdown(shutdown_global_engine)
     port = int(os.environ.get('PORT', 8080))
-    ui.run(host="0.0.0.0", port=port)
+    ui.run(host="0.0.0.0", port=port, reload=False)

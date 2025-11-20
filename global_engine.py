@@ -11,7 +11,8 @@ instances per session.
 from __future__ import annotations
 
 import os
-from typing import Optional
+import asyncio
+from typing import Optional, Tuple
 
 import chess
 import chess.engine
@@ -41,36 +42,48 @@ class GlobalStockfishEngine:
         """Initialize the global engine (only called once due to singleton pattern)."""
         if not hasattr(self, '_initialized'):
             self._initialized = True
-            self.engine: Optional[chess.engine.SimpleEngine] = None
+            self.transport: asyncio.SubprocessTransport | None = None
+            self.engine: chess.engine.UciProtocol | None = None
             self.time_limit = time_limit
-            self._ensure_engine()
+            # Defer engine start to first usage (async)
 
     @classmethod
     def get_instance(cls) -> Optional['GlobalStockfishEngine']:
         """Get the global engine instance, or None if not initialized."""
         return cls._instance
 
-    def _ensure_engine(self) -> None:
+    async def _ensure_engine(self) -> None:
         """Ensure the engine is started and available."""
-        if self.engine is None:
-            try:
-                self.engine = chess.engine.SimpleEngine.popen_uci(self._engine_path)
-            except Exception as e:
-                print(f"[GlobalStockfishEngine] Failed to start engine: {e}")
-                self.engine = None
+        if self.transport is not None and not self.transport.is_closing():
+            return
 
-    def evaluate_cp(self, board: chess.Board) -> Optional[int]:
+        try:
+            if not os.path.exists(self._engine_path):
+                print(f"Engine file not found at {self._engine_path}")
+                return
+
+            # Use async popen_uci directly
+            transport, engine = await chess.engine.popen_uci(self._engine_path)
+            self.transport = transport
+            self.engine = engine
+        except Exception as e:
+            print(f"[GlobalStockfishEngine] Failed to start engine: {type(e).__name__}: {e}")
+            self.engine = None
+            self.transport = None
+
+    async def evaluate_cp(self, board: chess.Board) -> Optional[int]:
         """
         Return evaluation in centipawns from White's perspective.
         Positive = White better, negative = Black better.
         Returns None if engine is unavailable.
         """
         try:
-            self._ensure_engine()
+            await self._ensure_engine()
             if self.engine is None:
                 return None
 
-            info = self.engine.analyse(board, chess.engine.Limit(time=self.time_limit))
+            # Use async analyse
+            info = await self.engine.analyse(board, chess.engine.Limit(time=self.time_limit))
             score = info["score"].white()
 
             if score.is_mate():
@@ -79,25 +92,29 @@ class GlobalStockfishEngine:
                 # Use 10_000 cp for "mate is coming"
                 return 10_000 if mate_in and mate_in > 0 else -10_000
 
-            return score.score(mate_score=10_000)
+            val = score.score(mate_score=10_000)
+            return val
         except Exception as e:
             print(f"[GlobalStockfishEngine] Evaluation error: {e}")
+            # Reset engine on error
+            await self.close()
             return None
 
-    def close(self) -> None:
+    async def close(self) -> None:
         """Close the engine if it exists."""
         if self.engine is not None:
             try:
-                self.engine.quit()
+                await self.engine.quit()
             except Exception:
                 pass
             self.engine = None
+            self.transport = None
 
     @classmethod
-    def shutdown(cls) -> None:
+    async def shutdown(cls) -> None:
         """Shutdown the global engine instance."""
         if cls._instance is not None:
-            cls._instance.close()
+            await cls._instance.close()
             cls._instance = None
 
 
@@ -107,14 +124,14 @@ def get_global_engine() -> Optional[GlobalStockfishEngine]:
     return GlobalStockfishEngine.get_instance()
 
 
-def evaluate_position(board: chess.Board) -> Optional[int]:
+async def evaluate_position(board: chess.Board) -> Optional[int]:
     """Evaluate a chess position using the global engine."""
     engine = get_global_engine()
     if engine:
-        return engine.evaluate_cp(board)
+        return await engine.evaluate_cp(board)
     return None
 
 
-def shutdown_global_engine() -> None:
+async def shutdown_global_engine() -> None:
     """Shutdown the global engine (call on application exit)."""
-    GlobalStockfishEngine.shutdown()
+    await GlobalStockfishEngine.shutdown()

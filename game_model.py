@@ -68,27 +68,31 @@ class GameModel:
             board = self.current_game.board()
             total = len(self.moves) + 1
             
-            # Evaluate starting position
-            self.evaluations[0] = await asyncio.to_thread(evaluate_position, board)
+            # Evaluate starting position (async call)
+            eval_score = await evaluate_position(board)
+            self.evaluations[0] = eval_score
+            
             if progress_callback:
                 progress_callback(1, total)
 
             # Evaluate each position after each move
             for i, move in enumerate(self.moves, start=1):
                 board.push(move)
-                eval_score = await asyncio.to_thread(evaluate_position, board)
+                # Async call directly
+                eval_score = await evaluate_position(board)
                 self.evaluations[i] = eval_score
                 
                 if progress_callback:
                     progress_callback(i + 1, total)
                 
-                # Yield control to allow UI updates
+                # Yield control to allow UI updates (though await evaluate_position already yields)
                 await asyncio.sleep(0)
             
             self._eval_complete = True
         except asyncio.CancelledError:
-            # Task was cancelled, that's fine
             pass
+        except Exception as e:
+            print(f"Error in background evaluation: {e}")
 
     def ensure_san_moves(self) -> list[str]:
         """Return SAN moves, computing and caching if needed."""
