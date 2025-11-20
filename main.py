@@ -84,7 +84,7 @@ class ChessAnalyzer:
             filename, content = await self.process_pgn_file(event.file)
 
             self.model.load_pgn_text(content)
-            self.move_row_elements.clear()  # Clear move row references
+
 
             # Update game title
             self.update_game_title()
@@ -204,11 +204,11 @@ class ChessAnalyzer:
     def load_sample_game(self):
         """Load the sample Kasparov vs Topalov game."""
         try:
-            with open('kasparov_topalov_1999.pgn', 'r', encoding='utf-8') as f:
+            with open(ROOT / 'kasparov_topalov_1999.pgn', 'r', encoding='utf-8') as f:
                 content = f.read()
 
             self.model.load_pgn_text(content)
-            self.move_row_elements.clear()  # Clear move row references
+
 
             # Update game title
             self.update_game_title()
@@ -306,6 +306,13 @@ class ChessAnalyzer:
             if self.eval_progress_label:
                 self.eval_progress_label.text = f"Analyzing positions: {percent}%"
             
+            if current == 1:
+                print("DEBUG: First evaluation complete")
+                # ui.notify("First evaluation complete")
+            
+            # Debug logging
+            # print(f"Eval {current}/{total}: {self.model.evaluations[current-1]}")
+            
             # Update eval bar for current position if we're viewing it
             if current - 1 == self.model.current_ply:
                 self.recompute_eval()
@@ -321,6 +328,7 @@ class ChessAnalyzer:
                 self.update_eval_chart()  # Final chart update
         
         self.model.start_background_evaluation(progress_callback)
+        ui.notify("Started background evaluation")
 
     def recompute_eval(self):
         """Update the eval bar using precalculated evaluations."""
