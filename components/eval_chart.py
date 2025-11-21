@@ -133,10 +133,12 @@ class EvalChart:
             xaxis=dict(
                 gridcolor='rgba(75, 85, 99, 0.3)',
                 dtick=5 if len(evals) > 30 else 2,
+                fixedrange=True,  # Disable x-axis zoom/pan
             ),
             yaxis=dict(
                 gridcolor='rgba(75, 85, 99, 0.3)',
-                range=[-10, 10] if max(abs(min(eval_pawns, default=0)), abs(max(eval_pawns, default=0))) <= 10 else None
+                range=[-10, 10] if max(abs(min(eval_pawns, default=0)), abs(max(eval_pawns, default=0))) <= 10 else None,
+                fixedrange=True,  # Disable y-axis zoom/pan
             ),
         )
 

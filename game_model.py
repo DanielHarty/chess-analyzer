@@ -96,13 +96,14 @@ class GameModel:
 
     def ensure_san_moves(self) -> list[str]:
         """Return SAN moves, computing and caching if needed."""
-        if not self.current_game or not self.moves:
+        if not self.moves:
             return []
 
         if self.san_moves:
             return self.san_moves
 
-        board = self.current_game.board()
+        # Always start from the initial position, regardless of current_game state
+        board = chess.Board(self._initial_fen)
         san_list: list[str] = []
 
         for mv in self.moves:
@@ -285,3 +286,61 @@ class GameModel:
         if self.current_ply < len(self.evaluations):
             return self.evaluations[self.current_ply]
         return None
+
+    def create_variation(self, ply: int, new_move: chess.Move) -> 'GameModel':
+        """Create a new variation by branching from the given ply with a new move.
+
+        Args:
+            ply: The ply to branch from (0 = starting position)
+            new_move: The new move to add as the variation
+
+        Returns:
+            A new GameModel instance with the variation
+        """
+        if not self.current_game or not self.board:
+            raise ValueError("Cannot create variation: no game loaded")
+
+        if ply < 0 or ply > len(self.moves):
+            raise ValueError(f"Ply {ply} is out of range (0-{len(self.moves)})")
+
+        # Create new game model with same initial position
+        variation_model = GameModel()
+        variation_model._initial_fen = self._initial_fen
+
+        # Copy the moves up to the branching point
+        variation_moves = self.moves[:ply]
+
+        # Add the new move
+        variation_moves.append(new_move)
+
+        # Reconstruct the game from the variation moves
+        game = chess.pgn.Game()
+        game.setup(chess.Board(self._initial_fen))
+
+        # Apply all moves to create the new game tree
+        node = game
+        for move in variation_moves:
+            node = node.add_variation(move)
+
+        variation_model.current_game = game
+        variation_model.moves = variation_moves
+        variation_model.board = chess.Board(self._initial_fen)
+
+        # Replay moves to set up the board state
+        for move in variation_moves:
+            variation_model.board.push(move)
+        variation_model.current_ply = len(variation_moves)
+        variation_model.last_move_squares = set()
+
+        # Initialize evaluations (will be computed later)
+        variation_model.evaluations = [None] * (len(variation_moves) + 1)
+
+        # Update last move squares if we have moves
+        if variation_moves:
+            last_move = variation_moves[-1]
+            variation_model.last_move_squares = {
+                chess.square_name(last_move.from_square),
+                chess.square_name(last_move.to_square),
+            }
+
+        return variation_model

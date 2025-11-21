@@ -9,15 +9,20 @@ from nicegui import ui
 class MovesList:
     """A component for displaying and navigating chess moves."""
 
-    def __init__(self, on_jump_to_ply=None):
+    def __init__(self, on_jump_to_ply=None, on_tab_change=None):
         """Initialize the moves list component.
 
         Args:
             on_jump_to_ply: Callback function called when a move is clicked (takes ply as argument)
+            on_tab_change: Callback function called when a tab is clicked (takes tab index as argument)
         """
         self.moves_container = None
+        self.tabs_container = None
         self.move_row_elements = {}  # Store references to move row elements for scrolling
         self.on_jump_to_ply = on_jump_to_ply or (lambda ply: None)
+        self.on_tab_change = on_tab_change or (lambda index: None)
+        self.variations = ["Main"]  # Default to single main variation
+        self.current_variation_index = 0
 
     def create_ui(self, parent_container=None):
         """Create the moves list UI elements.
@@ -28,6 +33,10 @@ class MovesList:
         container = parent_container or ui.column().classes('flex-1 w-full overflow-y-auto pl-4 pr-0 py-2 gap-2 modern-scrollbar min-h-0')
 
         with container:
+            # Tabs for variations
+            self.tabs_container = ui.row().classes('w-full gap-1 pb-2 flex-shrink-0 overflow-x-auto')
+
+            # Moves container
             self.moves_container = ui.column().classes('flex-1 w-full overflow-y-auto pl-4 pr-0 py-2 gap-2 modern-scrollbar min-h-0')
             with self.moves_container:
                 ui.label('No game loaded').classes('text-gray-400 text-center py-8')
@@ -37,6 +46,38 @@ class MovesList:
     def make_jump_handler(self, ply):
         """Create a click handler that jumps to the specified ply."""
         return lambda e: self.on_jump_to_ply(ply)
+
+    def make_tab_handler(self, index):
+        """Create a click handler that switches to the specified tab."""
+        return lambda e: self.on_tab_change(index)
+
+    def set_variations(self, variations, current_index=0):
+        """Set the available variations and current active tab.
+
+        Args:
+            variations: List of variation names (e.g., ["Main", "Var 1", "Var 2"])
+            current_index: Index of the currently active variation
+        """
+        self.variations = variations
+        self.current_variation_index = current_index
+
+        if self.tabs_container is None:
+            return
+
+        # Clear existing tabs
+        self.tabs_container.clear()
+
+        # Create new tabs
+        with self.tabs_container:
+            for i, variation_name in enumerate(variations):
+                is_active = (i == current_index)
+                tab_classes = 'px-3 py-1 text-sm rounded cursor-pointer flex-shrink-0'
+                if is_active:
+                    tab_classes += ' bg-blue-600 text-white'
+                else:
+                    tab_classes += ' bg-gray-700 text-gray-300 hover:bg-gray-600'
+
+                ui.button(variation_name, on_click=self.make_tab_handler(i)).classes(tab_classes)
 
     def display_moves(self, move_rows=None, current_ply=0):
         """Display the moves in the list.

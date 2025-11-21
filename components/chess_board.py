@@ -34,6 +34,7 @@ class ChessBoard:
         self.selected_square = None  # Track selected piece square
         self.legal_moves = set()     # Track legal move squares
         self.on_piece_selected = None # Callback for piece selection
+        self.on_move = None          # Callback for piece moves
         self.current_turn_white = True  # Track whose turn it is (True = white, False = black)
 
         # Load JavaScript and CSS
@@ -69,7 +70,8 @@ class ChessBoard:
 
             # Chess board container
             with ui.element('div').classes('flex items-center justify-center') \
-                    .on('piece_clicked', self.handle_piece_click):
+                    .on('piece_clicked', self.handle_piece_click) \
+                    .on('piece_moved', self.handle_piece_moved):
                 self.board_html = ui.html(self.BOARD_HTML, sanitize=False).classes('block')
 
             # Initialize JavaScript
@@ -197,18 +199,43 @@ class ChessBoard:
                 }
             });
 
-            // Mouse up - drop piece (snap back for now)
+            // Mouse up - drop piece
             document.addEventListener('mouseup', function(event) {
-                if (window.chessAnim.isDragging) {
+                if (window.chessAnim.isDragging && window.chessAnim.draggedPiece) {
+                    // Calculate drop square
+                    const rect = canvas.getBoundingClientRect();
+                    const x = event.clientX - rect.left;
+                    const y = event.clientY - rect.top;
+
+                    const canvasX = (x / rect.width) * canvas.width;
+                    const canvasY = (y / rect.height) * canvas.height;
+
+                    const squareSize = canvas.width / 8;
+
+                    // Determine file (a=0, b=1, ..., h=7)
+                    const file = Math.floor(canvasX / squareSize);
+                    // Determine rank (1=0 at bottom, 8=7 at top)
+                    const rank = 7 - Math.floor(canvasY / squareSize);
+
+                    // Convert to algebraic notation
+                    const fileLetter = String.fromCharCode(97 + file); // 97 = 'a'
+                    const rankNumber = rank + 1;
+                    const toSquare = fileLetter + rankNumber;
+
+                    // Emit piece moved event
+                    emitEvent('piece_moved', {
+                        from: startSquare,
+                        to: toSquare
+                    });
+
+                    // Reset dragging state - don't draw here, let Python update the position
                     window.chessAnim.isDragging = false;
                     window.chessAnim.draggedPiece = null;
 
-                    // Redraw to snap piece back
-                    if (window.chessAnim.draw) {
-                        window.chessAnim.draw();
-                    }
-
                     isMouseDown = false;
+                    startSquare = null;
+
+                    // Don't call draw() here - let the Python side update the position
                 }
             });
         }
@@ -242,6 +269,29 @@ class ChessBoard:
     def set_on_piece_selected(self, callback):
         """Set the callback for when a piece is selected."""
         self.on_piece_selected = callback
+
+    def set_on_move(self, callback):
+        """Set the callback for when a piece is moved."""
+        self.on_move = callback
+
+    def handle_piece_moved(self, e):
+        """Handle piece moved events from the board."""
+        args = e.args
+        move_data = args.get('detail', {})
+        from_square = move_data.get('from')
+        to_square = move_data.get('to')
+
+        if from_square and to_square and self.on_move:
+            # Store the move attempt for potential snap-back
+            self.pending_move = (from_square, to_square)
+            self.on_move(from_square, to_square)
+        else:
+            # Invalid move data, snap back if we have a dragged piece
+            self.snap_piece_back()
+
+    def snap_piece_back(self):
+        """Snap any dragged piece back to its original position."""
+        ui.run_javascript('if(window.chessAnim && window.chessAnim.draw) window.chessAnim.draw();')
 
     def update_current_turn(self, is_white_turn: bool):
         """Update the current player's turn in JavaScript.

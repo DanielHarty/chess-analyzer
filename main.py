@@ -65,12 +65,17 @@ class ChessAnalyzerUI:
         self.chess_board = ChessBoard()
         # Set up the callback for piece selection
         self.chess_board.set_on_piece_selected(self.handle_piece_selected)
+        # Set up the callback for piece moves
+        self.chess_board.set_on_move(self.controller.handle_move)
         # Initialize current turn (white starts by default)
         self.chess_board.update_current_turn(True)
         
         self.eval_bar = EvalBar()
         self.eval_chart = EvalChart()
-        self.moves_list = MovesList(on_jump_to_ply=self.controller.jump_to_ply)
+        self.moves_list = MovesList(
+            on_jump_to_ply=self.controller.jump_to_ply,
+            on_tab_change=self.controller.switch_variation
+        )
         self.game_controls = GameControls(
             on_first=self.controller.go_to_first_move,
             on_previous=self.controller.go_to_previous_move,
@@ -80,23 +85,26 @@ class ChessAnalyzerUI:
 
     def handle_piece_selected(self, square):
         """Handle piece selection on the board."""
-        if self.model.board:
+        model = self.controller.model
+        if model.board:
             # Update legal moves using the current board state
-            self.chess_board.update_legal_moves_from_board(self.model.board)
+            self.chess_board.update_legal_moves_from_board(model.board)
 
     def display_moves(self):
         """Display the moves in the right panel."""
-        move_rows = self.model.get_move_rows() if self.model.current_game else None
-        self.moves_list.display_moves(move_rows, self.model.current_ply)
-        self.game_controls.update_controls(self.model.current_game is not None)
+        model = self.controller.model
+        move_rows = model.get_move_rows() if model.current_game else None
+        self.moves_list.display_moves(move_rows, model.current_ply)
+        self.game_controls.update_controls(model.current_game is not None)
 
     def animate_transition(self, start_pos, end_pos, result):
         """Send animation command with full state context."""
+        model = self.controller.model
         self.chess_board.animate_transition(start_pos, end_pos, result)
         # Update current turn after move
-        self.chess_board.update_current_turn(self.model.board.turn)
+        self.chess_board.update_current_turn(model.board.turn)
         # Update legal moves after animation completes
-        self.chess_board.update_legal_moves_from_board(self.model.board)
+        self.chess_board.update_legal_moves_from_board(model.board)
 
     def trigger_upload(self):
         """Trigger the file upload dialog."""
@@ -104,7 +112,8 @@ class ChessAnalyzerUI:
 
     def update_game_title(self):
         """Update the game title display above the chess board."""
-        self.chess_board.update_game_title(self.model.current_game)
+        model = self.controller.model
+        self.chess_board.update_game_title(model.current_game)
 
     def create_ui(self):
         """Create and setup the user interface."""
@@ -139,25 +148,28 @@ class ChessAnalyzerUI:
 
     def send_full_position_to_js(self):
         """Send the current board position to the browser (no animation)."""
-        if self.model.board is None:
+        # Get the current model from the controller
+        model = self.controller.model
+        if model.board is None:
             return
 
-        pos_dict = self.model.get_position_dict()
+        pos_dict = model.get_position_dict()
         self.chess_board.send_position_to_js(pos_dict)
         # Update current turn
-        self.chess_board.update_current_turn(self.model.board.turn)
+        self.chess_board.update_current_turn(model.board.turn)
         # Update legal moves for any selected piece
-        self.chess_board.update_legal_moves_from_board(self.model.board)
+        self.chess_board.update_legal_moves_from_board(model.board)
 
     # ---------- Plotly evaluation chart ----------
 
     def update_eval_chart(self):
         """Update the plotly evaluation chart."""
-        blunders = self.model.get_blunders()
+        model = self.controller.model
+        blunders = model.get_blunders()
         self.eval_chart.update_eval_chart(
-            current_game=self.model.current_game,
-            evaluations=self.model.evaluations,
-            current_ply=self.model.current_ply,
+            current_game=model.current_game,
+            evaluations=model.evaluations,
+            current_ply=model.current_ply,
             blunders=blunders
         )
 
@@ -165,11 +177,12 @@ class ChessAnalyzerUI:
 
     def recompute_eval(self):
         """Update the eval bar using precalculated evaluations."""
-        if self.model.board is None:
+        model = self.controller.model
+        if model.board is None:
             self.eval_bar.update_eval_bar(None)
             return
 
-        cp = self.model.get_current_evaluation()
+        cp = model.get_current_evaluation()
         self.eval_bar.update_eval_bar(cp)
 
 
