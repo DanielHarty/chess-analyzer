@@ -103,8 +103,8 @@ class ChessAnalyzerUI:
         self.chess_board.animate_transition(start_pos, end_pos, result)
         # Update current turn after move
         self.chess_board.update_current_turn(model.board.turn)
-        # Update legal moves after animation completes
-        self.chess_board.update_legal_moves_from_board(model.board)
+        # Clear selection and don't show legal moves for navigation moves
+        self.chess_board.clear_selection()
 
     def trigger_upload(self):
         """Trigger the file upload dialog."""
@@ -157,8 +157,6 @@ class ChessAnalyzerUI:
         self.chess_board.send_position_to_js(pos_dict)
         # Update current turn
         self.chess_board.update_current_turn(model.board.turn)
-        # Update legal moves for any selected piece
-        self.chess_board.update_legal_moves_from_board(model.board)
 
     # ---------- Plotly evaluation chart ----------
 

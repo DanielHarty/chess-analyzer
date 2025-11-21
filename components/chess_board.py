@@ -256,7 +256,7 @@ class ChessBoard:
         """Handle click events from the board."""
         args = e.args
         square = args.get('detail', {}).get('square')
-        
+
         self.selected_square = square
         if square:
              # Trigger legal move update (this needs the board state from main app)
@@ -265,6 +265,14 @@ class ChessBoard:
         else:
              # Clear legal moves
              ui.run_javascript('if(window.chessAnim && window.chessAnim.setLegalMoveCircles) window.chessAnim.setLegalMoveCircles([]);')
+
+    def clear_selection(self):
+        """Clear the currently selected square and legal move highlights."""
+        self.selected_square = None
+        # Clear legal move circles
+        ui.run_javascript('if(window.chessAnim && window.chessAnim.setLegalMoveCircles) window.chessAnim.setLegalMoveCircles([]);')
+        # Clear highlighted squares
+        ui.run_javascript('if(window.chessAnim && window.chessAnim.setHighlightedSquares) window.chessAnim.setHighlightedSquares([]);')
 
     def set_on_piece_selected(self, callback):
         """Set the callback for when a piece is selected."""
@@ -332,9 +340,8 @@ class ChessBoard:
             f'{{ window.chessAnim.setPosition({position_json}); }}'
         )
 
-        # Update legal moves if a piece is selected
-        if hasattr(self, 'selected_square') and self.selected_square:
-            self.update_legal_moves(position_dict)
+        # Clear selected square and legal moves during navigation
+        self.clear_selection()
 
     def update_legal_moves(self, position_dict):
         """Update legal move circles for the currently selected piece.
