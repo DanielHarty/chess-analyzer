@@ -34,6 +34,7 @@ class ChessBoard:
         self.selected_square = None  # Track selected piece square
         self.legal_moves = set()     # Track legal move squares
         self.on_piece_selected = None # Callback for piece selection
+        self.current_turn_white = True  # Track whose turn it is (True = white, False = black)
 
         # Load JavaScript and CSS
         self._load_assets()
@@ -142,9 +143,13 @@ class ChessBoard:
 
                 console.log('mousedown ' + square);
 
-                // Check if there's a white piece on this square
+                // Check if there's a piece on this square that belongs to the current player
                 const piece = window.chessAnim.position ? window.chessAnim.position[square] : null;
-                if (piece && piece === piece.toUpperCase() && piece !== piece.toLowerCase()) {
+                const currentTurnWhite = window.chessAnim.currentTurnWhite !== false; // Default to true if not set
+                const isPieceWhite = piece && piece === piece.toUpperCase() && piece !== piece.toLowerCase();
+                const isPieceBlack = piece && piece === piece.toLowerCase() && piece !== piece.toUpperCase();
+
+                if ((currentTurnWhite && isPieceWhite) || (!currentTurnWhite && isPieceBlack)) {
                     isMouseDown = true;
                     startSquare = square;
 
@@ -237,6 +242,15 @@ class ChessBoard:
     def set_on_piece_selected(self, callback):
         """Set the callback for when a piece is selected."""
         self.on_piece_selected = callback
+
+    def update_current_turn(self, is_white_turn: bool):
+        """Update the current player's turn in JavaScript.
+
+        Args:
+            is_white_turn: True if it's white's turn, False if it's black's turn
+        """
+        self.current_turn_white = is_white_turn
+        ui.run_javascript(f'if(window.chessAnim) window.chessAnim.currentTurnWhite = {str(is_white_turn).lower()};')
 
     def update_game_title(self, current_game=None):
         """Update the game title display.

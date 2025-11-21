@@ -65,6 +65,8 @@ class ChessAnalyzerUI:
         self.chess_board = ChessBoard()
         # Set up the callback for piece selection
         self.chess_board.set_on_piece_selected(self.handle_piece_selected)
+        # Initialize current turn (white starts by default)
+        self.chess_board.update_current_turn(True)
         
         self.eval_bar = EvalBar()
         self.eval_chart = EvalChart()
@@ -91,6 +93,8 @@ class ChessAnalyzerUI:
     def animate_transition(self, start_pos, end_pos, result):
         """Send animation command with full state context."""
         self.chess_board.animate_transition(start_pos, end_pos, result)
+        # Update current turn after move
+        self.chess_board.update_current_turn(self.model.board.turn)
         # Update legal moves after animation completes
         self.chess_board.update_legal_moves_from_board(self.model.board)
 
@@ -140,6 +144,8 @@ class ChessAnalyzerUI:
 
         pos_dict = self.model.get_position_dict()
         self.chess_board.send_position_to_js(pos_dict)
+        # Update current turn
+        self.chess_board.update_current_turn(self.model.board.turn)
         # Update legal moves for any selected piece
         self.chess_board.update_legal_moves_from_board(self.model.board)
 
