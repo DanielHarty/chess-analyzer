@@ -94,15 +94,6 @@
         const cx = x + size / 2; // This assumes x,y is top-left of square
         const cy = y + size / 2; 
         
-        // HOWEVER, if we are dragging, x,y might be the center?
-        // The caller of drawPiece passes coordinates.
-        // For grid: x=file*size, y=rank*size -> top-left. So cx=x+size/2 is correct.
-        // For dragging: we pass mouseX, mouseY. We want the piece centered there.
-        // So if we are dragging, we should treat x,y as center.
-        
-        // Let's check if we are drawing the dragged piece
-        // Actually, simpler to adjust the caller for drag to pass top-left
-        
         const isWhite = (piece === piece.toUpperCase());
 
         ctx.font = (size * 0.7) + 'px system-ui';
@@ -111,22 +102,6 @@
         ctx.lineWidth = size * 0.08;
         ctx.shadowBlur = size * 0.15;
         
-        // We draw at cx, cy which is center. 
-        // If we pass x,y as center, we should use x,y directly.
-        // But static pieces pass x,y as top-left.
-        
-        // Let's change drawPiece to take cx, cy (center coordinates) directly? 
-        // Or we handle it in the caller.
-        
-        // Let's stick to x,y being top-left corner for consistency, 
-        // EXCEPT when we call it for dragged piece, we'll pass (mouseX - size/2, mouseY - size/2)
-        
-        // Wait, let's look at how it uses x,y:
-        // const cx = x + size / 2;
-        // const cy = y + size / 2;
-        // ctx.strokeText(glyph, cx, cy);
-        
-        // So drawPiece expects x,y to be TOP-LEFT of the bounding box.
         
         if (isWhite) {
             ctx.fillStyle = '#FFFFFF';
