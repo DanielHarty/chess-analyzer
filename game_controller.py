@@ -316,10 +316,10 @@ class GameController:
             self.view.recompute_eval()
             self.view.update_eval_chart()
             self._update_variations_ui()
-        else:
-            print(f"Invalid index {index}, games has {len(self.games)} items")
 
             # Start background evaluation for the new variation if needed
             if not self.model._eval_complete:
                 self.start_evaluation_with_progress()
+        else:
+            print(f"Invalid index {index}, games has {len(self.games)} items")
 
