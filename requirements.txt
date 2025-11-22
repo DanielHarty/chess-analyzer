@@ -1,3 +1,4 @@
 nicegui
 python-chess
 plotly
+httpx

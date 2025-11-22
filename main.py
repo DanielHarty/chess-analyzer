@@ -17,6 +17,7 @@ from components.chess_board import ChessBoard
 from components.moves_list import MovesList
 from components.header_bar import HeaderBar
 from components.game_controls import GameControls
+from components.chesscom_dialog import ChesscomDialog
 import platform
 import asyncio
 
@@ -58,9 +59,13 @@ class ChessAnalyzerUI:
         self.controller = GameController(self.model, self)
 
         # UI Components
+        self.chesscom_dialog = ChesscomDialog(
+            on_game_selected=self.controller.load_chesscom_game
+        )
         self.header_bar = HeaderBar(
             on_upload=self.controller.handle_upload,
-            on_load_sample=self.controller.load_sample_game
+            on_load_sample=self.controller.load_sample_game,
+            on_load_chesscom=self.show_chesscom_dialog
         )
         self.chess_board = ChessBoard()
         # Set up the callback for piece selection
@@ -109,6 +114,10 @@ class ChessAnalyzerUI:
     def trigger_upload(self):
         """Trigger the file upload dialog."""
         self.header_bar.trigger_upload()
+
+    def show_chesscom_dialog(self):
+        """Show the chess.com game loader dialog."""
+        self.chesscom_dialog.show()
 
     def update_game_title(self):
         """Update the game title display above the chess board."""

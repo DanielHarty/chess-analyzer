@@ -9,17 +9,19 @@ from nicegui import ui
 class HeaderBar:
     """A header bar component for the chess analyzer application."""
 
-    def __init__(self, on_upload=None, on_load_sample=None):
+    def __init__(self, on_upload=None, on_load_sample=None, on_load_chesscom=None):
         """Initialize the header bar component.
 
         Args:
             on_upload: Callback function called when a file is uploaded (takes event as argument)
             on_load_sample: Callback function called when the load sample button is clicked
+            on_load_chesscom: Callback function called when the chess.com button is clicked
         """
         self.upload_element = None
         self.eval_progress_label = None
         self.on_upload = on_upload or (lambda e: None)
         self.on_load_sample = on_load_sample or (lambda: None)
+        self.on_load_chesscom = on_load_chesscom or (lambda: None)
 
     def create_ui(self, parent_container=None):
         """Create the header bar UI elements.
@@ -44,6 +46,13 @@ class HeaderBar:
                 'Load Sample',
                 icon='play_arrow',
                 on_click=self.on_load_sample
+            ).classes('')
+
+            # Chess.com button
+            ui.button(
+                'Chess.com',
+                icon='language',
+                on_click=self.on_load_chesscom
             ).classes('')
 
             # Visible upload button

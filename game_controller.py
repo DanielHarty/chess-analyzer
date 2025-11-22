@@ -43,6 +43,18 @@ class GameController:
             print(f"✗ Sample game load error: {e}")
             ui.notify(f"Failed to load sample game: {e}", type="negative")
 
+    def load_chesscom_game(self, pgn_content):
+        """Load a game from chess.com PGN content.
+
+        Args:
+            pgn_content: PGN string content from chess.com
+        """
+        try:
+            self._load_game_and_refresh_ui(pgn_content)
+        except Exception as e:
+            print(f"✗ Chess.com game load error: {e}")
+            ui.notify(f"Failed to load Chess.com game: {e}", type="negative")
+
     def _load_game_and_refresh_ui(self, content):
         """Load PGN content into model and refresh all UI components."""
         self.model.load_pgn_text(content)
